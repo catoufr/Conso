@@ -916,7 +916,7 @@ nav.tabs button{position:relative}
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '24', APP_DATE = '6 novembre 2026';
+  const APP_VERSION = '25', APP_DATE = '6 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -1360,6 +1360,7 @@ nav.tabs button{position:relative}
     const hd = Object.keys(m.by).sort();
     let h = header();
     if (!storageOk) h += `<div class="warn">Ce navigateur ne garde pas les données entre deux ouvertures. Utilise la sauvegarde ci-dessous après chaque modification.</div>`;
+    h += `<p class="small muted" style="margin:0 0 10px">Version de l'appli : <b>${APP_VERSION}</b> · ${APP_DATE}</p>`;
     h += syncCard();
     h += enedisCard();
     h += siteCard();
@@ -1368,7 +1369,6 @@ nav.tabs button{position:relative}
     h += `<div class="card"><h2>Importer</h2><label class="f" style="margin-bottom:10px">Catégorie du fichier<select id="cat" data-ch="cat"><option value="auto"${ui.cat === 'auto' ? ' selected' : ''}>Détection automatique</option><option value="edf"${ui.cat === 'edf' ? ' selected' : ''}>EDF / distributeur (zip ou CSV)</option><option value="ve"${ui.cat === 've' ? ' selected' : ''}>Recharge VE (export du chargeur)</option></select></label>${eqOpts}<label class="row" style="gap:8px;margin-top:10px"><input type="checkbox" id="force" ${ui.force ? 'checked' : ''} data-ch="force"><span class="small">Écraser aussi mes croix forcées à la main (recharge VE)</span></label><label class="f" style="margin-top:10px">Un zip d'export, ou des fichiers CSV<input type="file" id="files" multiple data-ch="files"></label>
       <details open style="margin-top:10px"><summary class="small">Si « Choisir un fichier » ne réagit pas : coller le texte d'un CSV</summary><label class="f" style="margin-top:8px">Contenu du CSV (ouvre-le dans une appli de fichiers, copie tout, colle ici)<textarea id="pastecsv" placeholder="Nom,Heure,Début :,Fin :…"></textarea></label><div class="row" style="margin-top:8px"><button class="btn" data-act="pastecsv">Importer ce texte</button></div></details><p class="note">Chaque fichier est reconnu tout seul, zip compris. Choisir la catégorie évite qu'un fichier soit rangé au mauvais endroit. Réimporter met à jour les valeurs sans créer de doublons, et tes corrections manuelles sont conservées. Pour la recharge VE : une recharge courte coche seulement ses créneaux ; une recharge longue (prise restée branchée) coche les créneaux de la règle de l'équipement dans sa fenêtre, avec un avis « cohérent » ou « peu probable » ; un jour sans recharge n'a pas de croix. Tes croix forcées à la main (cadenas) sont protégées ; coche « Écraser » pour les remplacer.</p>${ui.msg ? `<div class="msg">${esc(ui.msg)}</div>` : ''}</div>`;
     h += `<div class="card"><h2>Données en mémoire</h2><div class="list">
-      <div class="item"><span>Version de l'appli</span><span class="num">${APP_VERSION} · ${APP_DATE}</span></div>
       <div class="item"><span>Créneaux à la demi-heure</span><span class="num">${nSl}</span></div>
       <div class="item"><span>Jours couverts</span><span class="num">${m.dates.length ? dmy(m.dates[0]) + ' → ' + dmyFull(m.dates[m.dates.length - 1]) : '—'}</span></div>
       <div class="item"><span>Relevés d'index quotidiens</span><span class="num">${nIdx}</span></div>
