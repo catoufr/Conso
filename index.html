@@ -914,7 +914,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '20', APP_DATE = '6 novembre 2026';
+  const APP_VERSION = '21', APP_DATE = '6 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -1358,6 +1358,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
     let h = header();
     if (!storageOk) h += `<div class="warn">Ce navigateur ne garde pas les données entre deux ouvertures. Utilise la sauvegarde ci-dessous après chaque modification.</div>`;
     h += siteCard();
+    h += syncCard();
     h += `<div class="card"><h2>Affichage</h2><label class="f">Choix des heures<select id="timemode" data-ch="timemode"><option value="native"${prefs().timeList ? '' : ' selected'}>Sélecteur d'heure du téléphone</option><option value="list"${prefs().timeList ? ' selected' : ''}>Liste d'heures (si les boutons du sélecteur sont coupés)</option></select></label></div>`;
     const eqOpts = S.equip.length > 1 && ui.cat !== 'edf' ? `<label class="f" style="margin-top:10px">Équipement concerné par une recharge VE<select id="veeq" data-ch="veeq"><option value="">Choisi automatiquement</option>${S.equip.map((e) => `<option value="${e.id}"${ui.veEq === e.id ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>` : '';
     h += `<div class="card"><h2>Importer</h2><label class="f" style="margin-bottom:10px">Catégorie du fichier<select id="cat" data-ch="cat"><option value="auto"${ui.cat === 'auto' ? ' selected' : ''}>Détection automatique</option><option value="edf"${ui.cat === 'edf' ? ' selected' : ''}>EDF / distributeur (zip ou CSV)</option><option value="ve"${ui.cat === 've' ? ' selected' : ''}>Recharge VE (export du chargeur)</option></select></label>${eqOpts}<label class="row" style="gap:8px;margin-top:10px"><input type="checkbox" id="force" ${ui.force ? 'checked' : ''} data-ch="force"><span class="small">Écraser aussi mes croix forcées à la main (recharge VE)</span></label><label class="f" style="margin-top:10px">Un zip d'export, ou des fichiers CSV<input type="file" id="files" multiple data-ch="files"></label>
@@ -1559,6 +1560,127 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
       `<button data-act="tab" data-tab="${t.id}" ${t.id === ui.tab ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${t.icon}</svg>${t.label}</button>`).join('');
     window.scrollTo(0, scroll);
   }
+  /* ---------- synchronisation Google Drive (espace caché de l'appli) ---------- */
+  const GCLIENT = '163280160875-e3ml082aeieji23312rj1cad07u87fcv.apps.googleusercontent.com';
+  const GSCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+  const DFILE = 'conso-donnees.json';
+  const SYKEY = 'conso-sync-v1';
+  const sync = { busy: false, msg: '', conflict: null, tok: '', exp: 0 };
+  const syncInfo = () => { try { return JSON.parse(localStorage.getItem(SYKEY)) || {}; } catch (e) { return {}; } };
+  const setSyncInfo = (o) => { try { localStorage.setItem(SYKEY, JSON.stringify(Object.assign(syncInfo(), o))); } catch (e) { /* ignoré */ } };
+  const hashStr = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return h + ':' + s.length; };
+  const fmtDT = (v) => { try { return new Date(v).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }); } catch (e) { return String(v || ''); } };
+  function allData() {
+    save();
+    const data = {};
+    for (const s of sites.list) { try { const r = localStorage.getItem(siteKey(s.id)); data[s.id] = r ? JSON.parse(r) : null; } catch (e) { data[s.id] = null; } }
+    return { sites: JSON.parse(JSON.stringify(sites)), data };
+  }
+  const coreStr = () => JSON.stringify(allData());
+  function localEmpty() {
+    return Object.values(allData().data).every((d) => !d || (!Object.keys(d.slots || {}).length && !Object.keys(d.idx || {}).length && !(d.equip || []).length));
+  }
+  function applyPayload(p) {
+    try { localStorage.setItem('conso-before-sync', JSON.stringify(allData())); } catch (e) { /* trop gros : on continue */ }
+    for (const s of p.sites.list) if (p.data[s.id]) localStorage.setItem(siteKey(s.id), JSON.stringify(p.data[s.id]));
+    sites = p.sites; if (!sites.list.some((x) => x.id === sites.cur)) sites.cur = sites.list[0].id;
+    saveSites(); S = load();
+    Object.assign(ui, { preset: 'all', from: '', to: '', day: '', sel: null, backup: '', eqMsg: '', confirmEq: '', siteDel: 0, siteTyped: '' });
+  }
+  function loadGsi() {
+    return new Promise((res, rej) => {
+      if (window.google && google.accounts && google.accounts.oauth2) return res();
+      const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
+      s.onload = () => res(); s.onerror = () => rej(new Error('offline')); document.head.appendChild(s);
+    });
+  }
+  function gToken() {
+    if (sync.tok && Date.now() < sync.exp) return Promise.resolve(sync.tok);
+    return new Promise((resolve, reject) => {
+      const tc = google.accounts.oauth2.initTokenClient({
+        client_id: GCLIENT, scope: GSCOPE,
+        callback: (r) => { if (r && r.access_token) { sync.tok = r.access_token; sync.exp = Date.now() + ((r.expires_in || 3600) - 120) * 1000; resolve(sync.tok); } else reject(new Error((r && r.error) || 'auth')); },
+        error_callback: (e) => reject(new Error((e && e.type) || 'auth')),
+      });
+      tc.requestAccessToken({ prompt: '' });
+    });
+  }
+  async function dFetch(tok, url, opt) {
+    const r = await fetch(url, Object.assign({}, opt, { headers: Object.assign({ Authorization: 'Bearer ' + tok }, (opt && opt.headers) || {}) }));
+    if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error('drive ' + r.status + ' ' + t.slice(0, 160)); }
+    return r;
+  }
+  async function dFind(tok) {
+    const r = await dFetch(tok, 'https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=files(id,modifiedTime)&q=' + encodeURIComponent("name='" + DFILE + "'"));
+    const j = await r.json(); return j.files && j.files[0] ? j.files[0] : null;
+  }
+  async function dPut(tok, id, body) {
+    if (id) { const r = await dFetch(tok, 'https://www.googleapis.com/upload/drive/v3/files/' + id + '?uploadType=media&fields=id,modifiedTime', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body }); return r.json(); }
+    const b = 'conso' + Date.now();
+    const mp = '--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify({ name: DFILE, parents: ['appDataFolder'] }) + '\r\n--' + b + '\r\nContent-Type: application/json\r\n\r\n' + body + '\r\n--' + b + '--';
+    const r = await dFetch(tok, 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime', { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + b }, body: mp });
+    return r.json();
+  }
+  function syncErr(e) {
+    const m = String((e && e.message) || e);
+    if (m === 'offline' || /Failed to fetch|NetworkError/i.test(m)) return 'Pas de connexion : réessaie quand le téléphone est en ligne.';
+    if (/popup_closed|popup_failed/.test(m)) return 'La fenêtre Google a été fermée avant la fin.';
+    if (/access_denied/.test(m)) return 'Autorisation refusée.';
+    if (/drive 403/.test(m)) return 'Google refuse l\'accès : vérifie que « Google Drive API » est activée dans le projet Google Cloud. (' + m + ')';
+    if (/drive 401/.test(m)) { sync.tok = ''; return 'La connexion Google a expiré : touche de nouveau « Synchroniser ».'; }
+    return 'Échec de la synchronisation : ' + m;
+  }
+  async function doSync(mode) {
+    if (sync.busy) return;
+    sync.busy = true; sync.msg = 'Connexion à Google…'; sync.conflict = null; render();
+    try {
+      await loadGsi(); const tok = await gToken();
+      sync.msg = 'Lecture du Drive…'; render();
+      const f = await dFind(tok), info = syncInfo();
+      const h = hashStr(coreStr()), localChanged = h !== info.hash && !localEmpty();
+      const up = async () => {
+        sync.msg = 'Envoi vers le Drive…'; render();
+        const body = JSON.stringify(Object.assign({ v: 2, savedAt: new Date().toISOString() }, allData()));
+        const res = await dPut(tok, f ? f.id : null, body);
+        setSyncInfo({ hash: h, remote: res.modifiedTime, at: Date.now() });
+        sync.msg = 'Données envoyées sur le Drive (' + fmtDT(Date.now()) + ').';
+      };
+      const down = async () => {
+        if (!f) { sync.msg = 'Aucune sauvegarde sur le Drive pour l\'instant.'; return; }
+        sync.msg = 'Récupération depuis le Drive…'; render();
+        const p = await (await dFetch(tok, 'https://www.googleapis.com/drive/v3/files/' + f.id + '?alt=media')).json();
+        if (!p || p.v !== 2 || !p.sites || !p.data) throw new Error('fichier du Drive illisible');
+        applyPayload(p);
+        setSyncInfo({ hash: hashStr(coreStr()), remote: f.modifiedTime, at: Date.now() });
+        sync.msg = 'Données récupérées depuis le Drive (sauvegarde du Drive du ' + fmtDT(p.savedAt || f.modifiedTime) + ').';
+      };
+      if (mode === 'up') await up();
+      else if (mode === 'down') await down();
+      else if (!f) { if (localEmpty()) sync.msg = 'Rien à synchroniser : aucune donnée ici ni sur le Drive.'; else await up(); }
+      else {
+        const remoteChanged = f.modifiedTime !== info.remote;
+        if (!remoteChanged && !localChanged) sync.msg = 'Déjà à jour (dernière synchronisation : ' + (info.at ? fmtDT(info.at) : 'jamais') + ').';
+        else if (!remoteChanged) await up();
+        else if (!localChanged) await down();
+        else sync.conflict = { remote: f.modifiedTime };
+      }
+      if (sync.conflict) sync.msg = '';
+    } catch (e) { sync.msg = syncErr(e); }
+    sync.busy = false; render();
+  }
+  function syncCard() {
+    const info = syncInfo();
+    let changed = false;
+    try { changed = hashStr(coreStr()) !== info.hash && !localEmpty(); } catch (e) { /* ignoré */ }
+    return `<div class="card"><h2>Synchronisation Google Drive</h2>
+      <p class="small muted">Sauvegarde automatique de toutes tes données dans un espace caché de ton Drive, visible seulement par cette appli. Utilise le même compte Google sur ton téléphone et sur ton PC.</p>
+      <p class="small" style="margin-top:8px">${info.at ? 'Dernière synchronisation : ' + fmtDT(info.at) + (changed ? ' · <b>modifications pas encore envoyées</b>' : '') : 'Jamais synchronisé sur cet appareil.'}</p>
+      <div class="row" style="margin-top:10px"><button class="btn" data-act="sync"${sync.busy ? ' disabled' : ''}>${sync.busy ? 'Synchronisation…' : 'Synchroniser'}</button></div>
+      ${sync.msg ? `<div class="msg" style="margin-top:10px">${esc(sync.msg)}</div>` : ''}
+      ${sync.conflict ? `<div class="warn" style="margin-top:10px">Les données ont changé à la fois ici et sur le Drive (sauvegarde du Drive : ${fmtDT(sync.conflict.remote)}). Choisis celles à garder : l'autre version sera remplacée. Avant un remplacement ici, une copie de sécurité est gardée sur ce téléphone.<div class="row" style="margin-top:10px;gap:8px"><button class="btn" data-act="syncdown">Garder le Drive</button><button class="btn ghost" data-act="syncup">Garder ce téléphone</button></div></div>` : ''}
+      <details style="margin-top:12px"><summary class="small">Forcer un sens</summary><div class="row" style="margin-top:8px;gap:8px"><button class="btn ghost" data-act="syncup"${sync.busy ? ' disabled' : ''}>Envoyer ce téléphone vers le Drive</button><button class="btn ghost" data-act="syncdown"${sync.busy ? ' disabled' : ''}>Récupérer depuis le Drive</button></div></details></div>`;
+  }
+
   function go(tab) {
     ui.tab = tab; ui.sel = null; ui.eqMsg = ''; ui.confirmEq = ''; ui.siteDel = 0; ui.siteTyped = '';
     try { if (location.hash !== '#' + tab) history.replaceState(null, '', '#' + tab); } catch (e) { /* ignoré */ }
@@ -1795,6 +1917,9 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
       render();
     }
     else if (a === 'applycal') { S.shift = Number(el.dataset.v); save(); render(); }
+    else if (a === 'sync') doSync('auto');
+    else if (a === 'syncup') doSync('up');
+    else if (a === 'syncdown') doSync('down');
     else if (a === 'mkbackup') { ui.backup = JSON.stringify(S); render(); }
     else if (a === 'copybk') {
       const ta = document.getElementById('bk');
@@ -1905,6 +2030,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
   if (TABS.some((x) => x.id === h0)) ui.tab = h0;
   save();
   render();
+  setTimeout(() => { loadGsi().catch(() => { /* hors connexion */ }); }, 1500);
 })();
 
 </script>
