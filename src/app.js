@@ -28,7 +28,7 @@
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '25', APP_DATE = '6 novembre 2026';
+  const APP_VERSION = '26', APP_DATE = '6 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -842,7 +842,7 @@
     return `<div class="card"><h2>Synchronisation Google Drive</h2>
       <p class="small muted">Sauvegarde automatique de toutes tes données dans un espace caché de ton Drive, visible seulement par cette appli. Utilise le même compte Google sur ton téléphone et sur ton PC.</p>
       <p class="small" style="margin-top:8px">${info.at ? 'Dernière synchronisation de cet appareil (' + devName() + ') : ' + fmtDT(info.at) + (changed ? ' · <b>modifications pas encore envoyées</b>' : '') : 'Jamais synchronisé sur cet appareil.'}</p>
-      ${info.at && info.by ? '<p class="small muted" style="margin-top:4px">Dernière version connue sur le Drive : envoyée depuis ' + (info.by === devName() ? 'cet appareil' : (info.by === 'téléphone' ? 'le téléphone' : info.by === 'PC' ? 'le PC' : info.by)) + '.</p>' : ''}
+      ${info.at && info.by ? '<p class="small muted" style="margin-top:4px">Version actuelle du Drive : envoyée depuis ' + (info.by === devName() ? 'cet appareil (' + devName() + ')' : (info.by === 'téléphone' ? 'le téléphone' : info.by === 'PC' ? 'le PC' : info.by)) + (info.remote ? ', le ' + fmtDT(info.remote) : '') + '.</p>' : ''}
       <div class="row" style="margin-top:10px"><button class="btn" data-act="sync"${sync.busy ? ' disabled' : ''}>${sync.busy ? 'Synchronisation…' : 'Synchroniser'}</button></div>
       ${sync.msg ? `<div class="msg" style="margin-top:10px">${esc(sync.msg)}</div>` : ''}
       ${sync.conflict ? `<div class="warn" style="margin-top:10px">Les données ont changé à la fois ici et sur le Drive (sauvegarde du Drive : ${fmtDT(sync.conflict.remote)}). Choisis celles à garder : l'autre version sera remplacée. Avant un remplacement ici, une copie de sécurité est gardée sur ce téléphone.<div class="row" style="margin-top:10px;gap:8px"><button class="btn" data-act="syncdown">Garder le Drive</button><button class="btn ghost" data-act="syncup">Garder ce téléphone</button></div></div>` : ''}
