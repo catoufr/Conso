@@ -28,7 +28,7 @@
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '22', APP_DATE = '6 novembre 2026';
+  const APP_VERSION = '23', APP_DATE = '6 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -473,6 +473,7 @@
     let h = header();
     if (!storageOk) h += `<div class="warn">Ce navigateur ne garde pas les données entre deux ouvertures. Utilise la sauvegarde ci-dessous après chaque modification.</div>`;
     h += syncCard();
+    h += enedisCard();
     h += siteCard();
     h += `<div class="card"><h2>Affichage</h2><label class="f">Choix des heures<select id="timemode" data-ch="timemode"><option value="native"${prefs().timeList ? '' : ' selected'}>Sélecteur d'heure du téléphone</option><option value="list"${prefs().timeList ? ' selected' : ''}>Liste d'heures (si les boutons du sélecteur sont coupés)</option></select></label></div>`;
     const eqOpts = S.equip.length > 1 && ui.cat !== 'edf' ? `<label class="f" style="margin-top:10px">Équipement concerné par une recharge VE<select id="veeq" data-ch="veeq"><option value="">Choisi automatiquement</option>${S.equip.map((e) => `<option value="${e.id}"${ui.veEq === e.id ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>` : '';
@@ -495,6 +496,49 @@
     h += `<div class="card"><h2>Tout effacer</h2>${ui.confirm ? `<p class="small">Cela supprime les relevés, les corrections et les contrats de ce navigateur.</p><div class="row" style="margin-top:10px"><button class="btn danger" data-act="wipe">Oui, tout effacer</button><button class="btn ghost" data-act="nowipe">Annuler</button></div>`
       : `<button class="btn danger" data-act="askwipe">Effacer les données</button>`}</div>`;
     return h;
+  }
+
+
+  /* ---------- Enedis (via Conso API) : test de connexion, v23 ---------- */
+  const EKEY = 'conso-enedis-v1';
+  const en = { busy: false, msg: '', ok: null };
+  function enCfg() { try { return JSON.parse(localStorage.getItem(EKEY)) || {}; } catch (e) { return {}; } }
+  function setEnCfg(k, v) { try { const c = enCfg(); c[k] = v; localStorage.setItem(EKEY, JSON.stringify(c)); } catch (e) { /* ignoré */ } }
+  function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  async function enTest() {
+    const c = enCfg(), tok = (c.token || '').trim(), prm = (c.prm || '').replace(/\s+/g, '');
+    if (!tok || !prm) { en.ok = false; en.msg = 'Renseigne d\'abord le jeton et le numéro du compteur.'; render(); return; }
+    en.busy = true; en.ok = null; en.msg = 'Test en cours…'; render();
+    const d2 = new Date(), d1 = new Date(Date.now() - 4 * 864e5);
+    const url = 'https://conso.boris.sh/api/consommation_quotidienne?pointId=' + encodeURIComponent(prm) + '&dateDebut=' + ymd(d1) + '&dateFin=' + ymd(d2);
+    try {
+      const r = await fetch(url, { headers: { Authorization: 'Bearer ' + tok } });
+      const txt = await r.text();
+      if (r.ok) {
+        let n = null;
+        try { const j = JSON.parse(txt); n = Array.isArray(j.interval_reading) ? j.interval_reading.length : null; } catch (e) { /* ignoré */ }
+        en.ok = true;
+        en.msg = 'Ça marche : le service répond' + (n !== null ? ' (' + n + ' jour' + (n > 1 ? 's' : '') + ' reçu' + (n > 1 ? 's' : '') + ' sur les 4 derniers).' : '.') + (n === 0 ? ' Aucune valeur reçue pour l\'instant : la collecte est peut-être encore en cours d\'activation.' : '');
+      } else {
+        en.ok = false;
+        const hint = r.status === 401 || r.status === 403 ? 'jeton refusé ou expiré' : r.status === 404 ? 'collecte pas encore activée chez Enedis, ou numéro de compteur incorrect' : r.status === 429 ? 'trop de demandes, réessaie plus tard' : 'erreur du service';
+        en.msg = 'Le service a répondu avec une erreur (' + r.status + ') : ' + hint + '.' + (txt ? ' Détail : ' + txt.slice(0, 140) : '');
+      }
+    } catch (e) {
+      en.ok = false;
+      en.msg = 'Pas de réponse exploitable : soit pas de réseau, soit le navigateur bloque cet appel depuis l\'appli (le service n\'autorise sans doute pas les appels depuis une page web). Dans ce cas la mise à jour automatique ne marchera pas dans l\'appli seule.';
+    }
+    en.busy = false; render();
+  }
+  function enedisCard() {
+    const c = enCfg();
+    const cls = en.ok === true ? 'msg' : 'warn';
+    return `<div class="card"><h2>Mise à jour automatique Enedis</h2>
+      <p class="note" style="margin-top:0">Test de connexion au service Conso API. Le jeton et le numéro du compteur restent uniquement sur cet appareil : ils ne sont ni envoyés sur Drive, ni dans la sauvegarde.</p>
+      <label class="f" style="margin-top:10px">Jeton (token)<input type="password" id="entok" autocomplete="off" data-ch="entok" value="${esc(c.token || '')}"></label>
+      <label class="f" style="margin-top:10px">Numéro du compteur<input type="text" id="enprm" inputmode="numeric" autocomplete="off" data-ch="enprm" value="${esc(c.prm || '')}"></label>
+      <div class="row" style="margin-top:10px"><button class="btn" data-act="entest"${en.busy ? ' disabled' : ''}>Tester la connexion</button></div>
+      ${en.msg ? `<div class="${cls}" style="margin-top:10px">${esc(en.msg)}</div>` : ''}</div>`;
   }
 
   function siteCard() {
@@ -1040,6 +1084,7 @@
       render();
     }
     else if (a === 'applycal') { S.shift = Number(el.dataset.v); save(); render(); }
+    else if (a === 'entest') enTest();
     else if (a === 'sync') doSync('auto');
     else if (a === 'syncup') doSync('up');
     else if (a === 'syncdown') doSync('down');
@@ -1075,6 +1120,8 @@
     else if (k === 'cwe') setContract(id, (c) => { c.weekendHC = el.checked; });
     else if (k === 'cnum') { const v = parseNum(el.value); setContract(id, (c) => { if (v !== null && v >= 0) c[el.dataset.f] = v; }); }
     else if (k === 'cat') { ui.cat = el.value; render(); }
+    else if (k === 'entok') { setEnCfg('token', el.value.trim()); }
+    else if (k === 'enprm') { setEnCfg('prm', el.value.replace(/\s+/g, '')); }
     else if (k === 'autosync') { setPref('autoSync', el.checked); }
     else if (k === 'timemode') { setPref('timeList', el.value === 'list'); render(); }
     else if (k === 'force') { ui.force = el.checked; }
