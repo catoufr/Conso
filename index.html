@@ -843,6 +843,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
     for (const e of state.equip || []) {
       if (e.mode === 'h24' || e.rest || eqOn(state, e, row.key, row.share) || eqSet(state, e, row.key) !== null) continue;
       if (lo && lo[e.id]) return e.id;
+      if (e.mode !== 'manual') continue; /* une plage est une tendance : pas de suggestion hors plage, sauf exception indiquée par l'utilisateur */
       const w = (pw[e.id] || {}).w || 0;
       if (w < 300) continue;
       if (sp.avail >= 0.6 * w && sp.avail <= 1.6 * w && Math.abs(sp.avail - w) < bd) { best = e.id; bd = Math.abs(sp.avail - w); }
@@ -913,6 +914,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
+  const APP_VERSION = '18', APP_DATE = '6 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -1186,6 +1188,24 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
       <p class="note">Pic de ${f1(top / 1000)} kVA le ${dmy(dTop)} : ${Math.round((top / lim) * 100)} % de tes ${tickFmt(kva)} kVA souscrits et ${Math.round((top / alt) * 100)} % de ${tickFmt(kva2)} kVA. ${over ? `${over} jour${over > 1 ? 's' : ''} sur ${n} au-dessus de ${tickFmt(kva2)} kVA.` : `Aucun des ${n} jours ne dépasse ${tickFmt(kva2)} kVA.`} Un hiver plus froid peut monter plus haut.</p></div>`;
   }
 
+  /* Somme de la journée par équipement (kWh) quand aucun créneau n'est sélectionné. */
+  function daySplit(m, d, sl) {
+    if (!S.equip.length) return '';
+    const acc = {}; let unx = 0, tot = 0;
+    for (const s of sl) {
+      const row = { key: s.key, date: d, min: s.min, w: s.w, share: C.hcShare(d, s.min, S.schedules, S.shift) };
+      const sp = C.splitSlot(S, row, m.pw);
+      for (const it of sp.items) acc[it.id] = (acc[it.id] || 0) + (it.w * 0.5) / 1000;
+      unx += (sp.unexplained * 0.5) / 1000; tot += (s.w * 0.5) / 1000;
+    }
+    if (!(tot > 0)) return '';
+    const rows = [{ name: 'Non expliqué', kwh: unx, grey: true }].concat(S.equip.map((e) => ({ name: e.name, kwh: acc[e.id] || 0 })).filter((r) => r.kwh >= 0.005).sort((x, y) => y.kwh - x.kwh));
+    return `<details class="fold" data-k="dayrep"${op('dayrep', true)} style="margin-top:10px"><summary class="foldh small">Répartition de la journée (${nf(1).format(tot)} kWh)</summary><div class="list" style="margin-top:8px">${rows.map((r) => {
+      const pc = (r.kwh / tot) * 100;
+      return `<div class="shr"><div class="row between"><span>${esc(r.name)}</span><span class="num">${nf(2).format(r.kwh)} kWh · ${Math.round(pc)} %</span></div><div class="bar"><i style="width:${pc.toFixed(1)}%;${r.grey ? 'background:var(--line)' : ''}"></i></div></div>`;
+    }).join('')}</div><p class="note">Somme des demi-heures du jour, d'après les équipements en route et leurs puissances. Touche une barre pour voir un créneau précis.</p></details>`;
+  }
+
   function viewDay(m) {
     if (!hasData(m)) return header() + empty();
     if (!ui.day) ui.day = m.dates[m.dates.length - 1];
@@ -1211,10 +1231,10 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
         const s = sl[sel], k = (s.w * 0.5) / 1000, f = C.hcShare(d, s.min, S.schedules, S.shift);
         h += `<div class="slot"><div class="row between"><h3 class="num">${C.fromMin(s.min)} – ${C.fromMin(s.min + 30)}</h3><span class="tag">${f >= 0.995 ? 'heures creuses' : f <= 0.005 ? 'heures pleines' : Math.round(f * 100) + ' % creuses'}</span></div>
           <p class="num" style="margin:4px 0 10px">${Math.round(s.w)} W · ${nf(3).format(k)} kWh${s.forced ? ` <span class="muted">(relevé : ${Math.round(s.raw)} W)</span>` : ''}</p>
-          ${equipChecks({ key: s.key, date: d, min: s.min, w: s.w, share: f }, m)}
+          <details class="fold" data-k="dayrep"${op('dayrep', true)} style="margin-top:8px"><summary class="foldh small">Répartition de ce créneau : équipements en route</summary>${equipChecks({ key: s.key, date: d, min: s.min, w: s.w, share: f }, m)}</details>
           <div class="row" style="margin-top:12px"><label class="f grow">Forcer la valeur (W)<input id="forcew" inputmode="decimal" value="${Math.round(s.w)}"></label>
           <button class="btn" data-act="force" data-key="${esc(s.key)}">Appliquer</button>${s.forced ? `<button class="btn ghost" data-act="unforce" data-key="${esc(s.key)}">Rétablir</button>` : ''}</div></div>`;
-      } else h += `<p class="note">Touche une barre pour voir le créneau et corriger sa valeur.</p>`;
+      } else h += `<p class="note">Touche une barre pour voir le créneau et corriger sa valeur.</p>` + daySplit(m, d, sl);
       h += '</div>';
       h += dayEquipCard(d) + assignCard(m);
     } else {
@@ -1238,25 +1258,28 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
     const sp = C.splitSlot(S, row, m.pw), byId = {};
     sp.items.forEach((it) => { byId[it.id] = it.w; });
     const sug = C.suggestFor(S, row, m.pw, m.loose);
-    let h = `<div class="eqchecks"><h3 class="small" style="margin:6px 0 2px">Équipements en route sur ce créneau</h3><div class="eqrow"><span class="grow"><b>Non expliqué</b><br><span class="small muted">part de la conso qu'aucun équipement n'explique</span></span><span class="num"><b>${Math.round(sp.unexplained)} W</b></span></div>`;
+    let h = `<div class="eqchecks"><div class="eqrow"><span class="grow"><b>Non expliqué</b><br><span class="small muted">part de la conso qu'aucun équipement n'explique</span></span><span class="num"><b>${Math.round(sp.unexplained)} W</b></span></div>`;
     for (const e of S.equip) {
       const on = C.eqOn(S, e, row.key, row.share), forced = C.eqSet(S, e, row.key) === true;
-      const auto = on && !forced && sp.idle.includes(e.id);
-      const st = auto ? 'auto' : on ? 'on' : sug === e.id ? 'sug' : 'off';
-      let how = forced ? 'confirmé' : st === 'on' ? (e.mode === 'h24' ? 'continu' : 'plage définie') : st === 'sug' ? 'estimé · touche pour confirmer' : '';
-      const w = st === 'sug' ? '≈ ' + Math.round(m.pw[e.id].w) + ' W' : st === 'on' && byId[e.id] ? Math.round(byId[e.id]) + ' W' : '—';
       const vw = on ? C.veWindow(S, e.id, row.key) : null, fl = m.pw._floor || 0;
+      const locked = C.eqLocked(S, e.id, row.key), exact = !!(vw && vw.from && vw.to);
+      /* Valeurs sûres : fond en continu, relevé du chargeur, plage sûre (ex. chauffe-eau), forçage manuel. Le reste d'une plage = tendance (pointillé). */
+      const sureOn = on && (e.mode === 'h24' || forced || locked || exact || e.sure);
+      const auto = on && !forced && sp.idle.includes(e.id);
+      const trend = on && !sureOn && !auto;
+      const st = auto ? 'auto' : on ? (sureOn ? 'on' : 'sug') : sug === e.id ? 'sug' : 'off';
+      let how = forced ? 'confirmé' : st === 'on' ? (e.mode === 'h24' ? 'continu' : exact ? '' : e.sure ? 'plage sûre' : 'plage définie') : trend ? 'tendance de la plage · touche pour confirmer' : st === 'sug' ? 'estimé · touche pour confirmer' : '';
+      const w = on && st !== 'auto' && byId[e.id] ? Math.round(byId[e.id]) + ' W' : st === 'sug' && m.pw[e.id] ? '≈ ' + Math.round(m.pw[e.id].w) + ' W' : '—';
       if (vw) {
         const r = (byId[e.id] || 0) + sp.avail, ref = m.pw[e.id].w || 3700;
         if (vw.from && vw.to) how = 'recharge confirmée par le chargeur';
         if (st === 'auto') how = `plage prévue, mais peu probable : puissance trop faible pour une recharge (≈ ${Math.round(r)} W au-dessus du fond)`;
         else how += (how ? ' · ' : '') + (r >= 0.5 * ref ? `cohérent avec une recharge (≈ ${Math.round(r)} W au-dessus du fond)` : `peu probable : puissance trop faible pour une recharge (≈ ${Math.round(r)} W au-dessus du fond)`);
       } else if (st === 'auto') how = `désactivé par l'analyse : consommation proche du fond (≈ ${Math.round(fl)} W). Touche pour forcer en route.`;
-      const locked = C.eqLocked(S, e.id, row.key);
       if (locked) how += (how ? ' · ' : '') + 'forcé par toi';
       h += `<div class="eqrow"><button class="eqx" data-act="eqtap" data-eq="${e.id}" data-key="${esc(row.key)}" data-st="${st}" role="checkbox" aria-checked="${st === 'on' ? 'true' : st === 'sug' ? 'mixed' : 'false'}" aria-label="${esc(e.name)} : ${st === 'on' ? 'en route' : st === 'sug' ? 'estimé en route, à confirmer' : st === 'auto' ? 'désactivé par l\'analyse' : 'à l\'arrêt'}">${eqIcon(st)}</button><span class="grow">${esc(e.name)}${how ? `<br><span class="small muted">${how}</span>` : ''}</span><span class="num muted">${w}</span>${locked ? `<button class="eqx" data-act="eqlock" data-eq="${e.id}" data-key="${esc(row.key)}" aria-label="Déverrouiller : ${esc(e.name)} sera de nouveau mis à jour par les imports" title="Verrouillé : touche pour déverrouiller"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2" fill="var(--ink)"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="var(--ink)" stroke-width="2"/></svg></button>` : ''}</div>`;
     }
-    return h + `<div class="legend"><span>${eqIcon('on').replace('width="24" height="24"', 'width="16" height="16"')}Croix pleine : en route</span><span>${eqIcon('sug').replace('width="24" height="24"', 'width="16" height="16"')}Croix pointillée : estimé</span><span>${eqIcon('auto').replace('width="24" height="24"', 'width="16" height="16"')}Carré pointillé : désactivé par l'analyse</span><span>Cadenas : forcé par toi, protégé des imports</span></div></div>`;
+    return h + `<div class="legend"><span>${eqIcon('on').replace('width="24" height="24"', 'width="16" height="16"')}Croix pleine : sûr (relevé, fond, plage sûre ou forcé par toi)</span><span>${eqIcon('sug').replace('width="24" height="24"', 'width="16" height="16"')}Croix pointillée : tendance ou estimé</span><span>${eqIcon('auto').replace('width="24" height="24"', 'width="16" height="16"')}Carré pointillé : désactivé par l'analyse</span><span>Cadenas : forcé par toi, protégé des imports</span></div></div>`;
   }
 
   const todayIso = () => { const t = new Date(), z = (n) => String(n).padStart(2, '0'); return t.getFullYear() + '-' + z(t.getMonth() + 1) + '-' + z(t.getDate()); };
@@ -1327,6 +1350,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
     h += `<div class="card"><h2>Importer</h2><label class="f" style="margin-bottom:10px">Catégorie du fichier<select id="cat" data-ch="cat"><option value="auto"${ui.cat === 'auto' ? ' selected' : ''}>Détection automatique</option><option value="edf"${ui.cat === 'edf' ? ' selected' : ''}>EDF / distributeur (zip ou CSV)</option><option value="ve"${ui.cat === 've' ? ' selected' : ''}>Recharge VE (export du chargeur)</option></select></label>${eqOpts}<label class="row" style="gap:8px;margin-top:10px"><input type="checkbox" id="force" ${ui.force ? 'checked' : ''} data-ch="force"><span class="small">Écraser aussi mes croix forcées à la main (recharge VE)</span></label><label class="f" style="margin-top:10px">Un zip d'export, ou des fichiers CSV<input type="file" id="files" multiple data-ch="files"></label>
       <details open style="margin-top:10px"><summary class="small">Si « Choisir un fichier » ne réagit pas : coller le texte d'un CSV</summary><label class="f" style="margin-top:8px">Contenu du CSV (ouvre-le dans une appli de fichiers, copie tout, colle ici)<textarea id="pastecsv" placeholder="Nom,Heure,Début :,Fin :…"></textarea></label><div class="row" style="margin-top:8px"><button class="btn" data-act="pastecsv">Importer ce texte</button></div></details><p class="note">Chaque fichier est reconnu tout seul, zip compris. Choisir la catégorie évite qu'un fichier soit rangé au mauvais endroit. Réimporter met à jour les valeurs sans créer de doublons, et tes corrections manuelles sont conservées. Pour la recharge VE : une recharge courte coche seulement ses créneaux ; une recharge longue (prise restée branchée) coche les créneaux de la règle de l'équipement dans sa fenêtre, avec un avis « cohérent » ou « peu probable » ; un jour sans recharge n'a pas de croix. Tes croix forcées à la main (cadenas) sont protégées ; coche « Écraser » pour les remplacer.</p>${ui.msg ? `<div class="msg">${esc(ui.msg)}</div>` : ''}</div>`;
     h += `<div class="card"><h2>Données en mémoire</h2><div class="list">
+      <div class="item"><span>Version de l'appli</span><span class="num">${APP_VERSION} · ${APP_DATE}</span></div>
       <div class="item"><span>Créneaux à la demi-heure</span><span class="num">${nSl}</span></div>
       <div class="item"><span>Jours couverts</span><span class="num">${m.dates.length ? dmy(m.dates[0]) + ' → ' + dmyFull(m.dates[m.dates.length - 1]) : '—'}</span></div>
       <div class="item"><span>Relevés d'index quotidiens</span><span class="num">${nIdx}</span></div>
@@ -1397,7 +1421,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
   }
 
   /* ---------- équipements ---------- */
-  const MODES = { h24: 'En continu (24 h/24)', hc: 'Heures creuses', hp: 'Heures pleines', range: 'Plage(s) répétitive(s) que je précise ici', manual: 'Sans plage fixe (je l\'indique dans l\'onglet Jour)' };
+  const MODES = { h24: 'En continu (24 h/24)', hc: 'Heures creuses', hp: 'Heures pleines', range: 'Plages répétitives', manual: 'Sans plage fixe' };
   const MODE_SHORT = { h24: '24 h/24', hc: 'Heures creuses', hp: 'Heures pleines', range: 'Plages', manual: 'Sans plage fixe' };
   function rangesOf(e) {
     if (!e.ranges) { e.ranges = C.eqRanges(e).map((r) => ({ from: r.from, to: r.to })); delete e.from; delete e.to; }
@@ -1405,7 +1429,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
   }
   const TPL = {
     frigo: { name: 'Frigo, box et veilles', mode: 'h24' },
-    eau: { name: 'Chauffe-eau', mode: 'hc' },
+    eau: { name: 'Chauffe-eau', mode: 'hc', sure: true },
     ve: { name: 'Chargeur de voiture électrique', mode: 'hc', wmax: 3700 },
     cuisson: { name: 'Cuisson', mode: 'range', rest: true, ranges: [{ from: '11:30', to: '14:00' }, { from: '18:30', to: '21:00' }] },
     menager: { name: 'Électroménager (lave-linge, four…)', mode: 'manual' },
@@ -1428,14 +1452,14 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
     const hrs = [];
     for (let hh = 0; hh < 24; hh++) { const a = m.unp[hh * 2].w, b = m.unp[hh * 2 + 1].w; hrs.push({ h: hh, w: (a + b) / 2, hc: C.hcShare(m.p.to, hh * 60, S.schedules, S.shift) >= 0.5 }); }
     const top = hrs.slice().sort((x, y) => y.w - x.w).slice(0, 3).filter((x) => x.w >= 100);
-    const unx = `<details class="fold" data-k="unx"${op('unx', true)} style="margin-top:12px"><summary class="foldh small">Non attribué : à quelles heures ?</summary>${powerBars(m.unp, m.p.to, -1, 'Puissance moyenne non attribuée par demi-heure', 'unx')}<div class="legend">${LEG_HPHC}</div>
+    const unx = `<details class="fold" data-k="unx"${op('unx', true)} style="margin-top:10px"><summary class="foldh small">Non attribué : à quelles heures ?</summary>${powerBars(m.unp, m.p.to, -1, 'Puissance moyenne non attribuée par demi-heure', 'unx')}<div class="legend">${LEG_HPHC}</div>
       <p class="note">Touche une barre pour ouvrir, dans l'onglet Jour, le créneau de cette heure où il reste le plus de conso non expliquée sur la période.</p>
       <p class="note">${top.length ? 'Là où il reste le plus : ' + top.map((x) => `${String(x.h).padStart(2, '0')} h (≈ ${Math.round(x.w)} W, ${x.hc ? 'HC' : 'HP'})`).join(', ') + '. ' : ''}Ajoute un équipement sur ces heures (ou une « puissance variable » comme la cuisson sur ses plages) pour les attribuer.</p></details>`;
-    return `<details class="card fold" data-k="split"${op('split', true)}><summary class="foldh"><h2 style="margin:0">Répartition · ${dmy(m.p.from)} → ${dmy(m.p.to)}</h2></summary><div class="list" style="margin-top:10px">${rows.map((r) => {
+    return `<details class="card fold" data-k="split"${op('split', true)}><summary class="foldh"><h2 style="margin:0">Répartition · ${dmy(m.p.from)} → ${dmy(m.p.to)}</h2></summary>${unx}<div class="list" style="margin-top:14px">${rows.map((r) => {
       const pc = at.total.kwh ? (r.kwh / at.total.kwh) * 100 : 0;
       return `<div class="shr"><div class="row between"><span>${esc(r.name)}</span><span class="num">${f1(r.kwh)} kWh · ${eur(r.eur)} · ${Math.round(pc)} %</span></div><div class="bar"><i style="width:${pc.toFixed(1)}%;${r.grey ? 'background:var(--line)' : ''}"></i></div></div>`;
     }).join('')}</div>
-      <p class="note">Calculé sur ${days} jour${days > 1 ? 's' : ''} avec détail à la demi-heure. Coût de l'énergie seule, au prix de « ${esc(m.ref.name)} », sans abonnement. Plus tu précises les créneaux et les mesures réelles, plus la part « non expliqué » se réduit.${m.est ? ` Fond permanent estimé : ${Math.round(m.est.floor)} W (moyenne des 10 % de créneaux les plus bas).` : ''}</p>${unx}</details>`;
+      <p class="note">Calculé sur ${days} jour${days > 1 ? 's' : ''} avec détail à la demi-heure. Coût de l'énergie seule, au prix de « ${esc(m.ref.name)} », sans abonnement. Plus tu précises les créneaux et les mesures réelles, plus la part « non expliqué » se réduit.${m.est ? ` Fond permanent estimé : ${Math.round(m.est.floor)} W (moyenne des 10 % de créneaux les plus bas).` : ''}</p></details>`;
   }
 
   function crossCard(m) {
@@ -1476,10 +1500,11 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
       <summary class="foldh"><div class="grow"><h3>${esc(e.name)}</h3><div class="row" style="gap:8px;margin-top:3px;flex-wrap:nowrap"><span class="tag">${MODE_SHORT[e.mode] || e.mode}</span><span class="num muted small">${pw.src === 'variable' ? 'variable' : pw.w >= 1 ? Math.round(pw.w) + ' W' : ''}</span></div></div></summary>
       <div class="grid2" style="margin-top:10px">
         <label class="f" style="grid-column:1/-1">Nom<input id="en-${e.id}" value="${esc(e.name)}" data-ch="ename" data-id="${e.id}"></label>
-        <label class="f">Fonctionnement<select id="em-${e.id}" data-ch="emode" data-id="${e.id}">${Object.entries(MODES).map(([k, v]) => `<option value="${k}"${e.mode === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+        <label class="f" style="grid-column:1/-1">Fonctionnement<select id="em-${e.id}" data-ch="emode" data-id="${e.id}">${Object.entries(MODES).map(([k, v]) => `<option value="${k}"${e.mode === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
         ${e.rest ? '' : `<label class="f">Puissance (W, facultatif)<input id="ew-${e.id}" inputmode="decimal" value="${e.watts > 0 ? e.watts : ''}" placeholder="${pw.w ? Math.round(pw.w) : ''}" data-ch="ewatts" data-id="${e.id}"></label>`}
         ${e.mode !== 'h24' ? `<label class="row" style="grid-column:1/-1;gap:8px;align-items:flex-start"><input type="checkbox" id="er-${e.id}" ${e.rest ? 'checked' : ''} data-ch="erest" data-id="${e.id}" style="margin-top:3px"><span class="small">Puissance variable : prend ce qui reste (cuisson, bricolage…)</span></label>` : ''}
         ${e.rest ? '' : `<label class="row" style="grid-column:1/-1;gap:8px;align-items:flex-start"><input type="checkbox" id="ep-${e.id}" ${e.prio === true || (e.mode === 'h24' && e.prio !== false) ? 'checked' : ''} data-ch="eprio" data-id="${e.id}" style="margin-top:3px"><span class="small">Valeur prioritaire : ma valeur (ou la moyenne estimée) est respectée, les autres équipements s'ajustent autour</span></label>`}
+        ${e.mode !== 'h24' ? `<label class="row" style="grid-column:1/-1;gap:8px;align-items:flex-start"><input type="checkbox" id="es-${e.id}" ${e.sure ? 'checked' : ''} data-ch="esure" data-id="${e.id}" style="margin-top:3px"><span class="small">Plage sûre : il tourne vraiment sur sa plage (ex. chauffe-eau). Sinon la plage n'est qu'une tendance, affichée en pointillé dans l'onglet Jour.</span></label>` : ''}
         ${e.mode !== 'h24' && !e.rest ? `<label class="f">Puissance max (W)<input id="ex-${e.id}" inputmode="decimal" value="${e.wmax > 0 ? e.wmax : ''}" placeholder="ex. 3700" data-ch="ewmax" data-id="${e.id}"></label>` : ''}
         ${e.mode === 'range' ? `<div class="ranges" style="grid-column:1/-1">${rangesOf(e).map((r, i) => {
           const rd = r.days && r.days.length ? r.days : days;
@@ -1798,12 +1823,13 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
       const e = S.equip.find((x) => x.id === el.dataset.eq), key = el.dataset.key;
       if (e) { C.setEqOn(S, e, key, C.hcShare(key.slice(0, 10), C.hm(key.slice(11, 16)), S.schedules, S.shift), el.checked); save(); render(); }
     }
-    else if (k === 'ename' || k === 'erest' || k === 'eprio' || k === 'emode' || k === 'rfrom' || k === 'rto' || k === 'rday' || k === 'eday' || k === 'ewatts' || k === 'ewmax') {
+    else if (k === 'ename' || k === 'erest' || k === 'eprio' || k === 'esure' || k === 'emode' || k === 'rfrom' || k === 'rto' || k === 'rday' || k === 'eday' || k === 'ewatts' || k === 'ewmax') {
       const e = S.equip.find((x) => x.id === id);
       if (e) {
         if (k === 'ename') e.name = el.value.trim() || 'Équipement';
         else if (k === 'erest') { e.rest = el.checked; if (e.rest) { delete e.watts; delete e.wmax; } }
         else if (k === 'eprio') e.prio = el.checked;
+        else if (k === 'esure') e.sure = el.checked;
         else if (k === 'emode') { e.mode = el.value; if (e.mode === 'range') { const r = rangesOf(e); if (!r.length) r.push({ from: '18:00', to: '22:00' }); e.days = e.days && e.days.length ? e.days : [0, 1, 2, 3, 4, 5, 6]; } }
         else if (k === 'rday') {
           const r = rangesOf(e)[Number(el.dataset.i)];

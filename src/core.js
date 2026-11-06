@@ -682,6 +682,7 @@
     for (const e of state.equip || []) {
       if (e.mode === 'h24' || e.rest || eqOn(state, e, row.key, row.share) || eqSet(state, e, row.key) !== null) continue;
       if (lo && lo[e.id]) return e.id;
+      if (e.mode !== 'manual') continue; /* une plage est une tendance : pas de suggestion hors plage, sauf exception indiquée par l'utilisateur */
       const w = (pw[e.id] || {}).w || 0;
       if (w < 300) continue;
       if (sp.avail >= 0.6 * w && sp.avail <= 1.6 * w && Math.abs(sp.avail - w) < bd) { best = e.id; bd = Math.abs(sp.avail - w); }
