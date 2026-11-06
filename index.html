@@ -914,7 +914,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '18', APP_DATE = '6 novembre 2026';
+  const APP_VERSION = '19', APP_DATE = '6 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -1304,10 +1304,18 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
     return `<div class="card"><h2>Équipements ce jour</h2><div class="list">${rows.join('')}</div><p class="note">🔒 : plage forcée par toi. Les autres viennent de la règle de l'équipement. Modifie-les avec la carte ci-dessous.</p></div>`;
   }
 
+  /* Heure choisie dans une liste (le sélecteur d'heure natif d'Android coupe ses boutons sur certains téléphones). */
+  function tsel(attrs, val, step, blank) {
+    const set = new Set(); for (let m = 0; m < 1440; m += step) set.add(C.fromMin(m));
+    if (val) set.add(val);
+    const list = Array.from(set).sort();
+    return `<select ${attrs}>${blank ? `<option value=""${val ? '' : ' selected'}>—</option>` : ''}${list.map((t) => `<option value="${t}"${t === val ? ' selected' : ''}>${t}</option>`).join('')}</select>`;
+  }
+
   function assignCard(m) {
     if (!S.equip.length) return '';
     return `<div class="card"><h2>Affecter des équipements à une plage</h2>
-      <div class="grid2"><label class="f">De<input type="time" id="asf" value="01:00"></label><label class="f">À<input type="time" id="ast" value="05:30"></label>
+      <div class="grid2"><label class="f">De${tsel('id="asf"', '01:00', 30)}</label><label class="f">À${tsel('id="ast"', '05:30', 30)}</label>
       <label class="f" style="grid-column:1/-1">Jours concernés<select id="asscope"><option value="day">Ce jour seulement (${dmy(ui.day)})</option><option value="all">Tous les jours de la période du tableau de bord</option><option value="wk">Du lundi au vendredi de cette période</option><option value="we">Les week-ends de cette période</option></select></label></div>
       <div class="eqpick">${S.equip.map((e) => `<label class="row" style="gap:8px"><input type="checkbox" class="aseq" data-id="${e.id}">${esc(e.name)}</label>`).join('')}</div>
       <div class="row" style="margin-top:12px"><button class="btn" data-act="assign" data-v="on">En route</button><button class="btn ghost" data-act="assign" data-v="off">À l'arrêt</button><button class="btn ghost" data-act="assign" data-v="rule">Règle du mode</button></div>
@@ -1508,7 +1516,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
         ${e.mode !== 'h24' && !e.rest ? `<label class="f">Puissance max (W)<input id="ex-${e.id}" inputmode="decimal" value="${e.wmax > 0 ? e.wmax : ''}" placeholder="ex. 3700" data-ch="ewmax" data-id="${e.id}"></label>` : ''}
         ${e.mode === 'range' ? `<div class="ranges" style="grid-column:1/-1">${rangesOf(e).map((r, i) => {
           const rd = r.days && r.days.length ? r.days : days;
-          return `<div class="rgblock"><div class="rg"><span class="tag">Plage ${i + 1}</span><input type="time" id="rf-${e.id}-${i}" value="${r.from}" data-ch="rfrom" data-id="${e.id}" data-i="${i}" aria-label="Début plage ${i + 1}"><input type="time" id="rt-${e.id}-${i}" value="${r.to}" data-ch="rto" data-id="${e.id}" data-i="${i}" aria-label="Fin plage ${i + 1}"><button class="iconbtn" style="width:34px;height:34px;font-size:15px;flex:none" data-act="delrange" data-id="${e.id}" data-i="${i}" aria-label="Supprimer la plage ${i + 1}">×</button></div>
+          return `<div class="rgblock"><div class="rg"><span class="tag">Plage ${i + 1}</span>${tsel(`id="rf-${e.id}-${i}" data-ch="rfrom" data-id="${e.id}" data-i="${i}" aria-label="Début plage ${i + 1}"`, r.from, 15)}${tsel(`id="rt-${e.id}-${i}" data-ch="rto" data-id="${e.id}" data-i="${i}" aria-label="Fin plage ${i + 1}"`, r.to, 15)}<button class="iconbtn" style="width:34px;height:34px;font-size:15px;flex:none" data-act="delrange" data-id="${e.id}" data-i="${i}" aria-label="Supprimer la plage ${i + 1}">×</button></div>
           <div class="row" style="gap:6px;margin-top:6px" role="group" aria-label="Jours de la plage ${i + 1}">${DAYS_ORDER.map(([d, l]) => `<label class="dchip"><input type="checkbox" id="rd-${e.id}-${i}-${d}" ${rd.includes(d) ? 'checked' : ''} data-ch="rday" data-id="${e.id}" data-i="${i}" data-d="${d}"><span>${l}</span></label>`).join('')}</div></div>`;
         }).join('')}<div><button class="btn ghost" data-act="addrange" data-id="${e.id}">+ Ajouter une plage</button></div></div>` : ''}
       </div>
@@ -1518,7 +1526,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent);background:var(--soft)}
         <p class="note" style="margin-top:6px">Par exemple l'énergie affichée par ton chargeur pour une recharge. Avec les heures, les créneaux sont cochés. Sans heures (plage trop longue pour être fiable), les kWh sont notés et l'appli propose en pointillé, dans l'onglet Jour, les créneaux les plus cohérents.</p>
         ${meas.length ? `<details style="margin-top:6px" data-k="ml-${e.id}"${op('ml-' + e.id, false)}><summary class="foldh small">Détail des ${meas.length} mesures</summary>${meas.map((x) => `<div class="eqrow"><span class="grow num small">${x.from && x.to ? `${dmy(x.date)} ${x.from}–${x.to} · ${f1(x.kwh)} kWh · ${Math.round((x.kwh * 1000) / C.hoursBetween(x.from, x.to))} W` : `${x.win ? `${dmy(x.win.start.slice(0, 10))} ${x.win.start.slice(11)} → ${dmy(x.win.end.slice(0, 10))} ${x.win.end.slice(11)} · plage trop longue` : dmy(x.date) + ' sans heures'} · ${f1(x.kwh)} kWh`}</span><button class="iconbtn" style="width:34px;height:34px;font-size:15px" data-act="delmeas" data-id="${x.id}" aria-label="Supprimer cette mesure">×</button></div>`).join('')}</details>` : ''}
         <div class="grid2" style="margin-top:8px"><label class="f">Jour<input type="date" id="md-${e.id}" value="${ui.day || lastDay}"></label><label class="f">Énergie (kWh)<input id="mk-${e.id}" inputmode="decimal" placeholder="22"></label>
-        <label class="f">De (facultatif)<input type="time" id="mf-${e.id}"></label><label class="f">À (facultatif)<input type="time" id="mt-${e.id}"></label></div>
+        <label class="f">De (facultatif)${tsel(`id="mf-${e.id}"`, '', 5, true)}</label><label class="f">À (facultatif)${tsel(`id="mt-${e.id}"`, '', 5, true)}</label></div>
         <div class="row" style="margin-top:8px"><button class="btn" data-act="addmeas" data-id="${e.id}">Ajouter la mesure</button></div></details>
       <div class="row" style="margin-top:12px">${ui.confirmEq === e.id ? `<button class="btn danger" data-act="deleq" data-id="${e.id}">Confirmer la suppression</button><button class="btn ghost" data-act="keepeq">Annuler</button>` : `<button class="btn danger" data-act="askdeleq" data-id="${e.id}">Supprimer</button>`}</div></details>`;
   }
