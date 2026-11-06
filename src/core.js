@@ -35,7 +35,66 @@
     }
   }
 
+  /* Données Enedis (service Conso API) rassemblées par le script du PC :
+     { format:'conso-enedis', parts:[{ type, data }] }. Pour la courbe de charge, l'horodatage est la FIN
+     de la tranche de 30 min (comme dans les CSV) ; les créneaux sont stockés à leur DÉBUT.
+     Le jour du changement d'heure d'automne, l'heure murale en double : la première occurrence
+     (la plus tôt) reçoit le suffixe « |1 », comme dans les CSV. */
+  function parseEnedis(obj) {
+    const slots = {}, idx = {}, pmax = {};
+    let estimated = 0, stale = 0;
+    for (const part of obj.parts || []) {
+      const d = part && part.data;
+      if (!d) continue;
+      if (part.type === 'courbe_de_charge_consommation') {
+        const pts = [];
+        for (const g of d.grandeur || []) for (const pt of g.points || []) {
+          const m = String(pt.d).match(/^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2})/);
+          const v = pt.v === null || pt.v === '' || pt.v === undefined ? NaN : Number(pt.v);
+          if (!m || !isFinite(v)) continue;
+          let sm = Number(m[2]) * 60 + Number(m[3]) - 30, day = m[1];
+          if (sm < 0) { sm += 1440; day = addDays(day, -1); }
+          pts.push({ key: day + ' ' + fromMin(sm), v });
+        }
+        pts.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+        const last = {};
+        pts.forEach((x, i) => { last[x.key] = i; });
+        pts.forEach((x, i) => { slots[last[x.key] === i ? x.key : x.key + '|1'] = x.v; });
+      } else if (part.type === 'index_consommation') {
+        const cals = [];
+        for (const c of d.contexte || []) for (const g of c.grandeur || []) for (const cal of g.calendrier || []) cals.push(cal);
+        const cal = cals.find((c) => c.idCalendrier === 'FC000032') || cals.find((c) => (c.classeTemporelle || []).some((k) => k.idClasseTemporelle === 'HC'));
+        if (!cal) continue;
+        const get = (id) => ((cal.classeTemporelle || []).find((k) => k.idClasseTemporelle === id) || {}).valeur || [];
+        const hc = {}, hp = {};
+        for (const x of get('HC')) hc[String(x.d).slice(0, 10)] = Number(x.v) / 1000;
+        for (const x of get('HP')) hp[String(x.d).slice(0, 10)] = Number(x.v) / 1000;
+        for (const k of Object.keys(hc)) if (isFinite(hc[k]) && isFinite(hp[k])) idx[k] = { hp: hp[k], hc: hc[k] };
+      } else if (part.type === 'puissance_conso_max_quotidienne') {
+        for (const g of d.grandeur || []) for (const pt of g.points || []) {
+          const v = Number(pt.v);
+          if (isFinite(v) && pt.d) pmax[String(pt.d).slice(0, 10)] = v;
+        }
+      }
+    }
+    const ds = Object.keys(idx).sort();
+    for (let i = 1; i < ds.length; i++) {
+      const a = idx[ds[i - 1]], b = idx[ds[i]];
+      if (a && b && addDays(ds[i - 1], 1) === ds[i] && a.hp === b.hp && a.hc === b.hc) { delete idx[ds[i]]; stale++; }
+    }
+    const nS = Object.keys(slots).length, nI = Object.keys(idx).length, nP = Object.keys(pmax).length;
+    if (!nS && !nI && !nP) throw new Error('aucune donnée Enedis lisible');
+    return { type: 'enedis', slots, idx, pmax, count: nS, nIdx: nI, nPmax: nP, stale, estimated };
+  }
+
   function parseCsv(text) {
+    const t0 = text.replace(/^\uFEFF/, '').trimStart();
+    if (t0[0] === '{') {
+      let o = null;
+      try { o = JSON.parse(t0); } catch (e) { throw new Error('fichier JSON illisible'); }
+      if (o && o.format === 'conso-enedis') return parseEnedis(o);
+      throw new Error('format non reconnu');
+    }
     const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
     const head = lines.slice(0, 8).join(' ').toLowerCase();
     if (/charg/.test(head) && /d.but/.test(head) && /kwh/.test(head)) return parseVe(lines);
@@ -181,7 +240,8 @@
 
   function mergeImport(state, parsed) {
     if (parsed.type === 've') return state; /* à rattacher à un équipement : voir importVe */
-    if (parsed.type === 'power') Object.assign(state.slots, parsed.slots);
+    if (parsed.type === 'enedis') { Object.assign(state.slots, parsed.slots); Object.assign(state.idx, parsed.idx); Object.assign(state.pmax, parsed.pmax); }
+    else if (parsed.type === 'power') Object.assign(state.slots, parsed.slots);
     else if (parsed.type === 'index') Object.assign(state.idx, parsed.idx);
     else if (parsed.type === 'pmax') Object.assign(state.pmax, parsed.pmax);
     return state;

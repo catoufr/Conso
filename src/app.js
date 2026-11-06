@@ -28,7 +28,7 @@
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '26', APP_DATE = '6 novembre 2026';
+  const APP_VERSION = '27', APP_DATE = '6 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -868,6 +868,7 @@
     power: `${name} : ${p.count} créneaux à la demi-heure${p.estimated ? ` (dont ${p.estimated} estimés)` : ''}.`,
     index: `${name} : ${p.count} relevés d'index${p.stale ? ` (${p.stale} relevé identique à la veille ignoré)` : ''}.`,
     pmax: `${name} : ${p.count} jours de puissance max.`,
+    enedis: `${name} : données Enedis : ${p.count} créneaux, ${p.nIdx} index, ${p.nPmax} jours de puissance max.`,
     daily: `${name} : consommation quotidienne, déjà couverte par les index (ignorée).`,
     monthly: `${name} : consommation mensuelle, déjà couverte par les index (ignorée).`,
   }[p.type]);
@@ -934,7 +935,8 @@
         if (ui.cat === 've') { rep.push(`${nm} : ce n'est pas un export de recharge VE.`); return; }
         if (p.type === 'info') { rep.push(`${nm} : ${p.label}, déjà couverte par les autres fichiers.`); return; }
         C.mergeImport(S, p);
-        if (p.type === 'power') rep.push(`${nm} : ${p.count} créneaux à la demi-heure${p.estimated ? ` (dont ${p.estimated} estimés)` : ''}.`);
+        if (p.type === 'enedis') rep.push(`${nm} : données Enedis : ${p.count} créneaux à la demi-heure, ${p.nIdx} relevés d'index, ${p.nPmax} jours de puissance max.`);
+        else if (p.type === 'power') rep.push(`${nm} : ${p.count} créneaux à la demi-heure${p.estimated ? ` (dont ${p.estimated} estimés)` : ''}.`);
         else if (p.type === 'index') rep.push(`${nm} : ${p.count} relevés d'index${p.stale ? ` (${p.stale} relevé identique à la veille ignoré)` : ''}.`);
         else rep.push(`${nm} : ${p.count} jours de puissance max.`);
       } catch (e) { rep.push(`${nm} : ignoré (${e.message}).`); }
