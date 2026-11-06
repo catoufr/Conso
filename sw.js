@@ -1,5 +1,5 @@
 /* Service worker : l'appli fonctionne hors connexion une fois ouverte une fois. */
-const CACHE = 'conso-1793945611';
+const CACHE = 'conso-1793946661';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -21,5 +21,5 @@ self.addEventListener('fetch', (e) => {
   }
   if (url.origin !== location.origin) return;
   // Appli : réseau d'abord (pour recevoir les mises à jour), cache en secours hors connexion
-  e.respondWith(fetch(req).then((r) => { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return r; }).catch(() => caches.match(req).then((hit) => hit || caches.match('index.html'))));
+  e.respondWith(fetch(req, { cache: 'no-cache' }).then((r) => { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return r; }).catch(() => caches.match(req).then((hit) => hit || caches.match('index.html'))));
 });

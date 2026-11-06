@@ -21,5 +21,5 @@ self.addEventListener('fetch', (e) => {
   }
   if (url.origin !== location.origin) return;
   // Appli : réseau d'abord (pour recevoir les mises à jour), cache en secours hors connexion
-  e.respondWith(fetch(req).then((r) => { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return r; }).catch(() => caches.match(req).then((hit) => hit || caches.match('index.html'))));
+  e.respondWith(fetch(req, { cache: 'no-cache' }).then((r) => { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return r; }).catch(() => caches.match(req).then((hit) => hit || caches.match('index.html'))));
 });

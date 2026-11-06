@@ -28,7 +28,7 @@
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '19', APP_DATE = '6 novembre 2026';
+  const APP_VERSION = '20', APP_DATE = '6 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -418,8 +418,12 @@
     return `<div class="card"><h2>Équipements ce jour</h2><div class="list">${rows.join('')}</div><p class="note">🔒 : plage forcée par toi. Les autres viennent de la règle de l'équipement. Modifie-les avec la carte ci-dessous.</p></div>`;
   }
 
-  /* Heure choisie dans une liste (le sélecteur d'heure natif d'Android coupe ses boutons sur certains téléphones). */
+  /* Heure : sélecteur d'origine du téléphone par défaut ; liste en option (réglage dans Données). */
+  const PKEY = 'conso-prefs-v1';
+  function prefs() { try { return JSON.parse(localStorage.getItem(PKEY)) || {}; } catch (e) { return {}; } }
+  function setPref(k, v) { try { const p = prefs(); p[k] = v; localStorage.setItem(PKEY, JSON.stringify(p)); } catch (e) { /* ignoré */ } }
   function tsel(attrs, val, step, blank) {
+    if (prefs().timeList !== true) return `<input type="time" ${attrs} value="${val || ''}">`;
     const set = new Set(); for (let m = 0; m < 1440; m += step) set.add(C.fromMin(m));
     if (val) set.add(val);
     const list = Array.from(set).sort();
@@ -468,6 +472,7 @@
     let h = header();
     if (!storageOk) h += `<div class="warn">Ce navigateur ne garde pas les données entre deux ouvertures. Utilise la sauvegarde ci-dessous après chaque modification.</div>`;
     h += siteCard();
+    h += `<div class="card"><h2>Affichage</h2><label class="f">Choix des heures<select id="timemode" data-ch="timemode"><option value="native"${prefs().timeList ? '' : ' selected'}>Sélecteur d'heure du téléphone</option><option value="list"${prefs().timeList ? ' selected' : ''}>Liste d'heures (si les boutons du sélecteur sont coupés)</option></select></label></div>`;
     const eqOpts = S.equip.length > 1 && ui.cat !== 'edf' ? `<label class="f" style="margin-top:10px">Équipement concerné par une recharge VE<select id="veeq" data-ch="veeq"><option value="">Choisi automatiquement</option>${S.equip.map((e) => `<option value="${e.id}"${ui.veEq === e.id ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>` : '';
     h += `<div class="card"><h2>Importer</h2><label class="f" style="margin-bottom:10px">Catégorie du fichier<select id="cat" data-ch="cat"><option value="auto"${ui.cat === 'auto' ? ' selected' : ''}>Détection automatique</option><option value="edf"${ui.cat === 'edf' ? ' selected' : ''}>EDF / distributeur (zip ou CSV)</option><option value="ve"${ui.cat === 've' ? ' selected' : ''}>Recharge VE (export du chargeur)</option></select></label>${eqOpts}<label class="row" style="gap:8px;margin-top:10px"><input type="checkbox" id="force" ${ui.force ? 'checked' : ''} data-ch="force"><span class="small">Écraser aussi mes croix forcées à la main (recharge VE)</span></label><label class="f" style="margin-top:10px">Un zip d'export, ou des fichiers CSV<input type="file" id="files" multiple data-ch="files"></label>
       <details open style="margin-top:10px"><summary class="small">Si « Choisir un fichier » ne réagit pas : coller le texte d'un CSV</summary><label class="f" style="margin-top:8px">Contenu du CSV (ouvre-le dans une appli de fichiers, copie tout, colle ici)<textarea id="pastecsv" placeholder="Nom,Heure,Début :,Fin :…"></textarea></label><div class="row" style="margin-top:8px"><button class="btn" data-act="pastecsv">Importer ce texte</button></div></details><p class="note">Chaque fichier est reconnu tout seul, zip compris. Choisir la catégorie évite qu'un fichier soit rangé au mauvais endroit. Réimporter met à jour les valeurs sans créer de doublons, et tes corrections manuelles sont conservées. Pour la recharge VE : une recharge courte coche seulement ses créneaux ; une recharge longue (prise restée branchée) coche les créneaux de la règle de l'équipement dans sa fenêtre, avec un avis « cohérent » ou « peu probable » ; un jour sans recharge n'a pas de croix. Tes croix forcées à la main (cadenas) sont protégées ; coche « Écraser » pour les remplacer.</p>${ui.msg ? `<div class="msg">${esc(ui.msg)}</div>` : ''}</div>`;
@@ -936,6 +941,7 @@
     else if (k === 'cwe') setContract(id, (c) => { c.weekendHC = el.checked; });
     else if (k === 'cnum') { const v = parseNum(el.value); setContract(id, (c) => { if (v !== null && v >= 0) c[el.dataset.f] = v; }); }
     else if (k === 'cat') { ui.cat = el.value; render(); }
+    else if (k === 'timemode') { setPref('timeList', el.value === 'list'); render(); }
     else if (k === 'force') { ui.force = el.checked; }
     else if (k === 'veeq') { ui.veEq = el.value; render(); }
     else if (k === 'site') { switchSite(el.value); render(); }
