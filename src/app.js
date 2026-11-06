@@ -28,7 +28,7 @@
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '21', APP_DATE = '6 novembre 2026';
+  const APP_VERSION = '22', APP_DATE = '6 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -422,9 +422,10 @@
   const PKEY = 'conso-prefs-v1';
   function prefs() { try { return JSON.parse(localStorage.getItem(PKEY)) || {}; } catch (e) { return {}; } }
   function setPref(k, v) { try { const p = prefs(); p[k] = v; localStorage.setItem(PKEY, JSON.stringify(p)); } catch (e) { /* ignoré */ } }
-  function tsel(attrs, val, step, blank) {
+  function tsel(attrs, val, step, blank, end) {
     if (prefs().timeList !== true) return `<input type="time" ${attrs} value="${val || ''}">`;
     const set = new Set(); for (let m = 0; m < 1440; m += step) set.add(C.fromMin(m));
+    if (end) set.add('24:00'); /* fin de journée */
     if (val) set.add(val);
     const list = Array.from(set).sort();
     return `<select ${attrs}>${blank ? `<option value=""${val ? '' : ' selected'}>—</option>` : ''}${list.map((t) => `<option value="${t}"${t === val ? ' selected' : ''}>${t}</option>`).join('')}</select>`;
@@ -433,7 +434,7 @@
   function assignCard(m) {
     if (!S.equip.length) return '';
     return `<div class="card"><h2>Affecter des équipements à une plage</h2>
-      <div class="grid2"><label class="f">De${tsel('id="asf"', '01:00', 30)}</label><label class="f">À${tsel('id="ast"', '05:30', 30)}</label>
+      <div class="grid2"><label class="f">De${tsel('id="asf"', '01:00', 30)}</label><label class="f">À${tsel('id="ast"', '05:30', 30, false, true)}</label>
       <label class="f" style="grid-column:1/-1">Jours concernés<select id="asscope"><option value="day">Ce jour seulement (${dmy(ui.day)})</option><option value="all">Tous les jours de la période du tableau de bord</option><option value="wk">Du lundi au vendredi de cette période</option><option value="we">Les week-ends de cette période</option></select></label></div>
       <div class="eqpick">${S.equip.map((e) => `<label class="row" style="gap:8px"><input type="checkbox" class="aseq" data-id="${e.id}">${esc(e.name)}</label>`).join('')}</div>
       <div class="row" style="margin-top:12px"><button class="btn" data-act="assign" data-v="on">En route</button><button class="btn ghost" data-act="assign" data-v="off">À l'arrêt</button><button class="btn ghost" data-act="assign" data-v="rule">Règle du mode</button></div>
@@ -471,8 +472,8 @@
     const hd = Object.keys(m.by).sort();
     let h = header();
     if (!storageOk) h += `<div class="warn">Ce navigateur ne garde pas les données entre deux ouvertures. Utilise la sauvegarde ci-dessous après chaque modification.</div>`;
-    h += siteCard();
     h += syncCard();
+    h += siteCard();
     h += `<div class="card"><h2>Affichage</h2><label class="f">Choix des heures<select id="timemode" data-ch="timemode"><option value="native"${prefs().timeList ? '' : ' selected'}>Sélecteur d'heure du téléphone</option><option value="list"${prefs().timeList ? ' selected' : ''}>Liste d'heures (si les boutons du sélecteur sont coupés)</option></select></label></div>`;
     const eqOpts = S.equip.length > 1 && ui.cat !== 'edf' ? `<label class="f" style="margin-top:10px">Équipement concerné par une recharge VE<select id="veeq" data-ch="veeq"><option value="">Choisi automatiquement</option>${S.equip.map((e) => `<option value="${e.id}"${ui.veEq === e.id ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>` : '';
     h += `<div class="card"><h2>Importer</h2><label class="f" style="margin-bottom:10px">Catégorie du fichier<select id="cat" data-ch="cat"><option value="auto"${ui.cat === 'auto' ? ' selected' : ''}>Détection automatique</option><option value="edf"${ui.cat === 'edf' ? ' selected' : ''}>EDF / distributeur (zip ou CSV)</option><option value="ve"${ui.cat === 've' ? ' selected' : ''}>Recharge VE (export du chargeur)</option></select></label>${eqOpts}<label class="row" style="gap:8px;margin-top:10px"><input type="checkbox" id="force" ${ui.force ? 'checked' : ''} data-ch="force"><span class="small">Écraser aussi mes croix forcées à la main (recharge VE)</span></label><label class="f" style="margin-top:10px">Un zip d'export, ou des fichiers CSV<input type="file" id="files" multiple data-ch="files"></label>
@@ -636,7 +637,7 @@
         ${e.mode !== 'h24' && !e.rest ? `<label class="f">Puissance max (W)<input id="ex-${e.id}" inputmode="decimal" value="${e.wmax > 0 ? e.wmax : ''}" placeholder="ex. 3700" data-ch="ewmax" data-id="${e.id}"></label>` : ''}
         ${e.mode === 'range' ? `<div class="ranges" style="grid-column:1/-1">${rangesOf(e).map((r, i) => {
           const rd = r.days && r.days.length ? r.days : days;
-          return `<div class="rgblock"><div class="rg"><span class="tag">Plage ${i + 1}</span>${tsel(`id="rf-${e.id}-${i}" data-ch="rfrom" data-id="${e.id}" data-i="${i}" aria-label="Début plage ${i + 1}"`, r.from, 15)}${tsel(`id="rt-${e.id}-${i}" data-ch="rto" data-id="${e.id}" data-i="${i}" aria-label="Fin plage ${i + 1}"`, r.to, 15)}<button class="iconbtn" style="width:34px;height:34px;font-size:15px;flex:none" data-act="delrange" data-id="${e.id}" data-i="${i}" aria-label="Supprimer la plage ${i + 1}">×</button></div>
+          return `<div class="rgblock"><div class="rg"><span class="tag">Plage ${i + 1}</span>${tsel(`id="rf-${e.id}-${i}" data-ch="rfrom" data-id="${e.id}" data-i="${i}" aria-label="Début plage ${i + 1}"`, r.from, 15)}${tsel(`id="rt-${e.id}-${i}" data-ch="rto" data-id="${e.id}" data-i="${i}" aria-label="Fin plage ${i + 1}"`, r.to, 15, false, true)}<button class="iconbtn" style="width:34px;height:34px;font-size:15px;flex:none" data-act="delrange" data-id="${e.id}" data-i="${i}" aria-label="Supprimer la plage ${i + 1}">×</button></div>
           <div class="row" style="gap:6px;margin-top:6px" role="group" aria-label="Jours de la plage ${i + 1}">${DAYS_ORDER.map(([d, l]) => `<label class="dchip"><input type="checkbox" id="rd-${e.id}-${i}-${d}" ${rd.includes(d) ? 'checked' : ''} data-ch="rday" data-id="${e.id}" data-i="${i}" data-d="${d}"><span>${l}</span></label>`).join('')}</div></div>`;
         }).join('')}<div><button class="btn ghost" data-act="addrange" data-id="${e.id}">+ Ajouter une plage</button></div></div>` : ''}
       </div>
@@ -646,7 +647,7 @@
         <p class="note" style="margin-top:6px">Par exemple l'énergie affichée par ton chargeur pour une recharge. Avec les heures, les créneaux sont cochés. Sans heures (plage trop longue pour être fiable), les kWh sont notés et l'appli propose en pointillé, dans l'onglet Jour, les créneaux les plus cohérents.</p>
         ${meas.length ? `<details style="margin-top:6px" data-k="ml-${e.id}"${op('ml-' + e.id, false)}><summary class="foldh small">Détail des ${meas.length} mesures</summary>${meas.map((x) => `<div class="eqrow"><span class="grow num small">${x.from && x.to ? `${dmy(x.date)} ${x.from}–${x.to} · ${f1(x.kwh)} kWh · ${Math.round((x.kwh * 1000) / C.hoursBetween(x.from, x.to))} W` : `${x.win ? `${dmy(x.win.start.slice(0, 10))} ${x.win.start.slice(11)} → ${dmy(x.win.end.slice(0, 10))} ${x.win.end.slice(11)} · plage trop longue` : dmy(x.date) + ' sans heures'} · ${f1(x.kwh)} kWh`}</span><button class="iconbtn" style="width:34px;height:34px;font-size:15px" data-act="delmeas" data-id="${x.id}" aria-label="Supprimer cette mesure">×</button></div>`).join('')}</details>` : ''}
         <div class="grid2" style="margin-top:8px"><label class="f">Jour<input type="date" id="md-${e.id}" value="${ui.day || lastDay}"></label><label class="f">Énergie (kWh)<input id="mk-${e.id}" inputmode="decimal" placeholder="22"></label>
-        <label class="f">De (facultatif)${tsel(`id="mf-${e.id}"`, '', 5, true)}</label><label class="f">À (facultatif)${tsel(`id="mt-${e.id}"`, '', 5, true)}</label></div>
+        <label class="f">De (facultatif)${tsel(`id="mf-${e.id}"`, '', 5, true)}</label><label class="f">À (facultatif)${tsel(`id="mt-${e.id}"`, '', 5, true, true)}</label></div>
         <div class="row" style="margin-top:8px"><button class="btn" data-act="addmeas" data-id="${e.id}">Ajouter la mesure</button></div></details>
       <div class="row" style="margin-top:12px">${ui.confirmEq === e.id ? `<button class="btn danger" data-act="deleq" data-id="${e.id}">Confirmer la suppression</button><button class="btn ghost" data-act="keepeq">Annuler</button>` : `<button class="btn danger" data-act="askdeleq" data-id="${e.id}">Supprimer</button>`}</div></details>`;
   }
@@ -671,7 +672,7 @@
     const scroll = window.scrollY;
     root.innerHTML = (views[ui.tab] || viewDash)(m);
     document.getElementById('tabs').innerHTML = TABS.map((t) =>
-      `<button data-act="tab" data-tab="${t.id}" ${t.id === ui.tab ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${t.icon}</svg>${t.label}</button>`).join('');
+      `<button data-act="tab" data-tab="${t.id}" ${t.id === ui.tab ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${t.icon}</svg>${t.label}${t.id === 'donnees' && syncDirty() ? '<i class="tabdot" title="Modifications non envoyées sur le Drive"></i>' : ''}</button>`).join('');
     window.scrollTo(0, scroll);
   }
   /* ---------- synchronisation Google Drive (espace caché de l'appli) ---------- */
@@ -684,13 +685,20 @@
   const setSyncInfo = (o) => { try { localStorage.setItem(SYKEY, JSON.stringify(Object.assign(syncInfo(), o))); } catch (e) { /* ignoré */ } };
   const hashStr = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return h + ':' + s.length; };
   const fmtDT = (v) => { try { return new Date(v).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }); } catch (e) { return String(v || ''); } };
-  function allData() {
-    save();
+  function allData(noSave) {
+    if (!noSave) save();
     const data = {};
     for (const s of sites.list) { try { const r = localStorage.getItem(siteKey(s.id)); data[s.id] = r ? JSON.parse(r) : null; } catch (e) { data[s.id] = null; } }
     return { sites: JSON.parse(JSON.stringify(sites)), data };
   }
-  const coreStr = () => JSON.stringify(allData());
+  const coreStr = (noSave) => JSON.stringify(allData(noSave));
+  let dirtyAt = 0, dirtyV = false;
+  function syncDirty() {
+    if (Date.now() - dirtyAt < 2000) return dirtyV;
+    dirtyAt = Date.now();
+    try { dirtyV = !!syncInfo().at && hashStr(coreStr(true)) !== syncInfo().hash; } catch (e) { dirtyV = false; }
+    return dirtyV;
+  }
   function localEmpty() {
     return Object.values(allData().data).every((d) => !d || (!Object.keys(d.slots || {}).length && !Object.keys(d.idx || {}).length && !(d.equip || []).length));
   }
@@ -785,13 +793,14 @@
   function syncCard() {
     const info = syncInfo();
     let changed = false;
-    try { changed = hashStr(coreStr()) !== info.hash && !localEmpty(); } catch (e) { /* ignoré */ }
+    try { changed = hashStr(coreStr(true)) !== info.hash && !localEmpty(); } catch (e) { /* ignoré */ }
     return `<div class="card"><h2>Synchronisation Google Drive</h2>
       <p class="small muted">Sauvegarde automatique de toutes tes données dans un espace caché de ton Drive, visible seulement par cette appli. Utilise le même compte Google sur ton téléphone et sur ton PC.</p>
       <p class="small" style="margin-top:8px">${info.at ? 'Dernière synchronisation : ' + fmtDT(info.at) + (changed ? ' · <b>modifications pas encore envoyées</b>' : '') : 'Jamais synchronisé sur cet appareil.'}</p>
       <div class="row" style="margin-top:10px"><button class="btn" data-act="sync"${sync.busy ? ' disabled' : ''}>${sync.busy ? 'Synchronisation…' : 'Synchroniser'}</button></div>
       ${sync.msg ? `<div class="msg" style="margin-top:10px">${esc(sync.msg)}</div>` : ''}
       ${sync.conflict ? `<div class="warn" style="margin-top:10px">Les données ont changé à la fois ici et sur le Drive (sauvegarde du Drive : ${fmtDT(sync.conflict.remote)}). Choisis celles à garder : l'autre version sera remplacée. Avant un remplacement ici, une copie de sécurité est gardée sur ce téléphone.<div class="row" style="margin-top:10px;gap:8px"><button class="btn" data-act="syncdown">Garder le Drive</button><button class="btn ghost" data-act="syncup">Garder ce téléphone</button></div></div>` : ''}
+      <label class="row" style="margin-top:12px;gap:8px;align-items:flex-start"><input type="checkbox" data-ch="autosync" ${prefs().autoSync ? 'checked' : ''} style="margin-top:3px"><span class="small">Synchroniser à la première touche après l'ouverture de l'appli, si des modifications n'ont pas été envoyées ou après plusieurs heures. Une fenêtre Google s'ouvre alors brièvement.</span></label>
       <details style="margin-top:12px"><summary class="small">Forcer un sens</summary><div class="row" style="margin-top:8px;gap:8px"><button class="btn ghost" data-act="syncup"${sync.busy ? ' disabled' : ''}>Envoyer ce téléphone vers le Drive</button><button class="btn ghost" data-act="syncdown"${sync.busy ? ' disabled' : ''}>Récupérer depuis le Drive</button></div></details></div>`;
   }
 
@@ -1066,6 +1075,7 @@
     else if (k === 'cwe') setContract(id, (c) => { c.weekendHC = el.checked; });
     else if (k === 'cnum') { const v = parseNum(el.value); setContract(id, (c) => { if (v !== null && v >= 0) c[el.dataset.f] = v; }); }
     else if (k === 'cat') { ui.cat = el.value; render(); }
+    else if (k === 'autosync') { setPref('autoSync', el.checked); }
     else if (k === 'timemode') { setPref('timeList', el.value === 'list'); render(); }
     else if (k === 'force') { ui.force = el.checked; }
     else if (k === 'veeq') { ui.veEq = el.value; render(); }
@@ -1144,5 +1154,9 @@
   if (TABS.some((x) => x.id === h0)) ui.tab = h0;
   save();
   render();
+  document.addEventListener('pointerdown', function once() {
+    document.removeEventListener('pointerdown', once, true);
+    try { if (prefs().autoSync && navigator.onLine && syncInfo().at && (syncDirty() || Date.now() - syncInfo().at > 6 * 3600e3)) doSync('auto'); } catch (e) { /* ignoré */ }
+  }, true);
   setTimeout(() => { loadGsi().catch(() => { /* hors connexion */ }); }, 1500);
 })();
