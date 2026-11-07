@@ -427,7 +427,32 @@ nav.tabs button{position:relative}
         key, min: hm(key.slice(11, 16)), w: forced ? state.over[key] : raw, raw, forced,
       });
     }
+    for (const d of Object.keys(by)) markShares(state, by[d], d, state.shift);
     return by;
+  }
+
+  /* Part d'énergie en heures creuses de chaque créneau (s.hs).
+     Un créneau à cheval sur une frontière HP/HC n'est pas réparti au prorata des minutes quand une charge
+     pilotée par le contacteur du compteur (chauffe-eau, recharge VE) démarre ou s'arrête pile à la frontière :
+     cette charge ne tourne qu'en heures creuses, donc toute son énergie est creuse.
+     Estimation : niveau de base = créneau voisin entièrement en heures pleines ; l'excédent du créneau est la charge
+     pilotée si elle atteint au moins 1500 W pendant sa durée en heures creuses ; le reste du créneau est réparti au prorata.
+     Désactivable : state.relayFix === false. */
+  function markShares(state, sl, date, shift) {
+    const on = state.relayFix !== false;
+    for (let i = 0; i < sl.length; i++) {
+      const s = sl[i];
+      const f = hcShare(date, s.min, state.schedules, shift);
+      s.hs = f;
+      if (!on || f <= 0 || f >= 1 || !(s.w > 0)) continue;
+      const pv = sl[i - 1], nx = sl[i + 1];
+      let b = null;
+      if (pv && pv.min === s.min - 30 && hcShare(date, pv.min, state.schedules, shift) === 0) b = pv.w;
+      else if (nx && nx.min === s.min + 30 && hcShare(date, nx.min, state.schedules, shift) === 0) b = nx.w;
+      if (b === null || s.key.indexOf('|') >= 0) continue;
+      const e = (s.w * 0.5) / 1000, eb = (b * 0.5) / 1000, l = e - eb;
+      if (l > 0 && (l / (f * 0.5)) * 1000 >= 1500) s.hs = Math.min(e, l + f * eb) / e;
+    }
   }
 
   function scheduleFor(date, schedules) {
@@ -470,7 +495,7 @@ nav.tabs button{position:relative}
       let hp = 0, hc = 0, forced = 0;
       for (const s of sl) {
         const k = (s.w * 0.5) / 1000;
-        const f = hcShare(date, s.min, state.schedules, state.shift);
+        const f = s.hs;
         hc += k * f; hp += k * (1 - f);
         if (s.forced) forced++;
       }
@@ -484,7 +509,7 @@ nav.tabs button{position:relative}
     if (sl && sl.length) {
       let hp = 0, hc = 0;
       for (const s of sl) {
-        const k = (s.w * 0.5) / 1000, f = hcShare(date, s.min, state.schedules, state.shift);
+        const k = (s.w * 0.5) / 1000, f = s.hs;
         hc += k * f; hp += k * (1 - f);
       }
       return { date, hp, hc, kwh: hp + hc, src: 'partiel', n: sl.length, forced: 0 };
@@ -506,7 +531,9 @@ nav.tabs button{position:relative}
       let e = 0;
       for (const { d, hpIdx } of days) {
         let hp = 0;
-        for (const s of byDate[d]) hp += ((s.w * 0.5) / 1000) * (1 - hcShare(d, s.min, state.schedules, sh));
+        const tmp = byDate[d].map((s) => ({ key: s.key, min: s.min, w: s.w }));
+        markShares(state, tmp, d, sh);
+        for (const s of tmp) hp += ((s.w * 0.5) / 1000) * (1 - s.hs);
         e += Math.abs(hp - hpIdx);
       }
       return e / days.length;
@@ -613,7 +640,7 @@ nav.tabs button{position:relative}
       if ((from && d < from) || (to && d > to)) continue;
       const sl = byDate[d];
       if (sl.length < 46) continue;
-      for (const s of sl) rows.push({ key: s.key, date: d, min: s.min, w: s.w, share: hcShare(d, s.min, state.schedules, state.shift) });
+      for (const s of sl) rows.push({ key: s.key, date: d, min: s.min, w: s.w, share: hcShare(d, s.min, state.schedules, state.shift), hs: s.hs });
     }
     return rows;
   }
@@ -924,7 +951,7 @@ nav.tabs button{position:relative}
     const out = { eq: {}, unexplained: { kwh: 0, eur: 0 }, total: { kwh: 0, eur: 0 }, slots: 0 };
     for (const e of state.equip || []) out.eq[e.id] = { kwh: 0, eur: 0 };
     for (const r of slotRows(state, byDate, from, to)) {
-      const k = (r.w * 0.5) / 1000, pr = slotPrice(contract, r.date, r.share), sp = splitSlot(state, r, pw);
+      const k = (r.w * 0.5) / 1000, pr = slotPrice(contract, r.date, r.hs !== undefined ? r.hs : r.share), sp = splitSlot(state, r, pw);
       out.slots++;
       out.total.kwh += k; out.total.eur += k * pr;
       for (const it of sp.items) { const kk = (it.w * 0.5) / 1000; out.eq[it.id].kwh += kk; out.eq[it.id].eur += kk * pr; }
@@ -976,7 +1003,7 @@ nav.tabs button{position:relative}
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '27', APP_DATE = '6 novembre 2026';
+  const APP_VERSION = '28', APP_DATE = '6 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -1140,7 +1167,7 @@ nav.tabs button{position:relative}
     for (const t of ax.ticks) s += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text x="${L - 4}" y="${y(t) + 3}" text-anchor="end">${tickFmt(t)}</text>`;
     s += `<text x="${L}" y="${T - 1}" text-anchor="start" style="font-size:8.5px">kW</text>`;
     pts.forEach((p, i) => {
-      const f = C.hcShare(date, p.min, S.schedules, S.shift);
+      const f = p.hs !== undefined ? p.hs : C.hcShare(date, p.min, S.schedules, S.shift);
       const h = Math.max(0, y(0) - y(p.w / 1000)), x = L + slot * i + (slot - bw) / 2;
       const stroke = i === selIdx ? ' stroke="var(--ink)" stroke-width="2"' : p.forced ? ' stroke="var(--ink)" stroke-width="1.2" stroke-dasharray="2 1.5"' : '';
       s += `<rect x="${x}" y="${y(p.w / 1000)}" width="${bw}" height="${h}" fill="${f >= 0.5 ? 'var(--hc)' : 'var(--hp)'}"${stroke}/>`;
@@ -1255,7 +1282,7 @@ nav.tabs button{position:relative}
     if (!S.equip.length) return '';
     const acc = {}; let unx = 0, tot = 0;
     for (const s of sl) {
-      const row = { key: s.key, date: d, min: s.min, w: s.w, share: C.hcShare(d, s.min, S.schedules, S.shift) };
+      const row = { key: s.key, date: d, min: s.min, w: s.w, share: C.hcShare(d, s.min, S.schedules, S.shift), hs: s.hs };
       const sp = C.splitSlot(S, row, m.pw);
       for (const it of sp.items) acc[it.id] = (acc[it.id] || 0) + (it.w * 0.5) / 1000;
       unx += (sp.unexplained * 0.5) / 1000; tot += (s.w * 0.5) / 1000;
@@ -1290,7 +1317,7 @@ nav.tabs button{position:relative}
       h += `<div class="card"><h2>Puissance par demi-heure</h2>${powerBars(sl, d, sel, 'Puissance moyenne par demi-heure ce jour')}
         <div class="legend">${LEG_HPHC}<span>Contour pointillé : valeur corrigée</span></div>`;
       if (sel != null) {
-        const s = sl[sel], k = (s.w * 0.5) / 1000, f = C.hcShare(d, s.min, S.schedules, S.shift);
+        const s = sl[sel], k = (s.w * 0.5) / 1000, f = s.hs !== undefined ? s.hs : C.hcShare(d, s.min, S.schedules, S.shift);
         h += `<div class="slot"><div class="row between"><h3 class="num">${C.fromMin(s.min)} – ${C.fromMin(s.min + 30)}</h3><span class="tag">${f >= 0.995 ? 'heures creuses' : f <= 0.005 ? 'heures pleines' : Math.round(f * 100) + ' % creuses'}</span></div>
           <p class="num" style="margin:4px 0 10px">${Math.round(s.w)} W · ${nf(3).format(k)} kWh${s.forced ? ` <span class="muted">(relevé : ${Math.round(s.raw)} W)</span>` : ''}</p>
           <details class="fold" data-k="dayrep"${op('dayrep', true)} style="margin-top:8px"><summary class="foldh small">Répartition de ce créneau : équipements en route</summary>${equipChecks({ key: s.key, date: d, min: s.min, w: s.w, share: f }, m)}</details>
@@ -1516,6 +1543,7 @@ nav.tabs button{position:relative}
         <div class="ranges">${[0, 1].map((k) => `<div class="rg"><span class="tag">Plage ${k + 1}</span><input type="time" id="r${i}${k}a" value="${r(k)[0]}" data-ch="range" data-i="${i}" data-k="${k}" data-e="0" aria-label="Début plage ${k + 1}"><span aria-hidden="true">–</span><input type="time" id="r${i}${k}b" value="${r(k)[1]}" data-ch="range" data-i="${i}" data-k="${k}" data-e="1" aria-label="Fin plage ${k + 1}"></div>`).join('')}</div></div>`;
     });
     h += `<p class="note">Dates au format JJ/MM. Ces horaires servent à séparer heures pleines et creuses dans chaque demi-heure, au prorata des minutes.</p>
+      <label class="row" style="margin-top:12px;gap:8px;align-items:flex-start"><input type="checkbox" data-ch="relayfix" ${S.relayFix === false ? '' : 'checked'} style="margin-top:3px"><span class="small">Charges pilotées par le compteur (chauffe-eau, recharge VE) : dans un créneau à cheval entre heures pleines et creuses, compter en heures creuses toute la charge qui démarre ou s'arrête à la frontière, au lieu de la répartir au prorata des minutes. S'applique à tout l'historique.</span></label>
       <label class="f" style="margin-top:10px;max-width:220px">Décalage appliqué (minutes)<input id="shift" inputmode="decimal" value="${S.shift || 0}" data-ch="shift"></label>`;
     if (cal) {
       const better = cal.best !== (S.shift || 0) && cal.errBest < cal.errNow * 0.85;
@@ -2074,6 +2102,7 @@ nav.tabs button{position:relative}
     else if (k === 'cat') { ui.cat = el.value; render(); }
     else if (k === 'entok') { setEnCfg('token', el.value.trim()); }
     else if (k === 'enprm') { setEnCfg('prm', el.value.replace(/\s+/g, '')); }
+    else if (k === 'relayfix') { S.relayFix = el.checked; save(); render(); }
     else if (k === 'autosync') { setPref('autoSync', el.checked); }
     else if (k === 'timemode') { setPref('timeList', el.value === 'list'); render(); }
     else if (k === 'force') { ui.force = el.checked; }
