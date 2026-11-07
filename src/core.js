@@ -798,7 +798,52 @@
     return out;
   }
 
+  /* ---------- fusion de deux sauvegardes (synchro Drive, quand les deux côtés ont changé) ---------- */
+  const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
+  /* a = version la plus ancienne, b = la plus récente. Dictionnaires : union (la plus récente gagne en cas de désaccord) ;
+     listes d'éléments à identifiant : fusion par identifiant ; mesures : union ; autres listes : la plus récente ; valeurs : la plus récente. */
+  function deepMerge(a, b, key) {
+    if (b === undefined) return a;
+    if (a === undefined) return b;
+    if (isObj(a) && isObj(b)) {
+      const out = {};
+      for (const k of Object.keys(a)) out[k] = a[k];
+      for (const k of Object.keys(b)) out[k] = k in a ? deepMerge(a[k], b[k], k) : b[k];
+      return out;
+    }
+    if (Array.isArray(a) && Array.isArray(b)) {
+      if (key === 'eqMeas') {
+        const seen = new Set(a.map((x) => JSON.stringify(x))), out = a.slice();
+        for (const x of b) { const j = JSON.stringify(x); if (!seen.has(j)) { seen.add(j); out.push(x); } }
+        return out;
+      }
+      const withId = (l) => l.every((x) => isObj(x) && x.id !== undefined);
+      if (withId(a) && withId(b)) {
+        const out = a.map((x) => { const y = b.find((z) => z.id === x.id); return y ? deepMerge(x, y, '') : x; });
+        for (const y of b) if (!a.some((x) => x.id === y.id)) out.push(y);
+        return out;
+      }
+      return b;
+    }
+    return b;
+  }
+  /* local, remote : { sites:{list,cur}, data:{id: état} } ; localNewer : les modifications locales sont les plus récentes. */
+  function mergeSites(local, remote, localNewer) {
+    const list = [], ids = new Set(), data = {};
+    const newerL = localNewer ? local.sites.list : remote.sites.list, olderL = localNewer ? remote.sites.list : local.sites.list;
+    for (const s of olderL.concat(newerL)) {
+      const n = newerL.find((x) => x.id === s.id) || s;
+      if (!ids.has(s.id)) { ids.add(s.id); list.push({ id: s.id, name: n.name }); }
+    }
+    for (const s of list) {
+      const a = local.data[s.id], b = remote.data[s.id];
+      data[s.id] = a && b ? (localNewer ? deepMerge(b, a, '') : deepMerge(a, b, '')) : (a || b || null);
+    }
+    return { sites: { list, cur: local.sites.cur && ids.has(local.sites.cur) ? local.sites.cur : list[0].id }, data };
+  }
+
   const api = {
+    deepMerge, mergeSites,
     addDays, dow, frToIso, hm, fromMin, decode, parseCsv, parseIndex, parsePower, parsePmax, parsePmax, parseZip,
     defaultState, mergeImport, buildByDate, scheduleFor, hcMinutes, hcShare,
     dayStats, calibrate, rangesOf, allDates, periodStats, costFor, cmpKey,

@@ -28,7 +28,7 @@
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '30', APP_DATE = '6 novembre 2026';
+  const APP_VERSION = '31', APP_DATE = '6 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -53,7 +53,13 @@
     }
     return Object.assign(base, st);
   }
-  function save() { try { localStorage.setItem(siteKey(sites.cur), JSON.stringify(S)); storageOk = true; } catch (e) { storageOk = false; } }
+  function save() {
+    try {
+      const k = siteKey(sites.cur), j = JSON.stringify(S);
+      if (localStorage.getItem(k) !== j) { localStorage.setItem(k, j); localStorage.setItem('conso-lastedit', String(Date.now())); }
+      storageOk = true;
+    } catch (e) { storageOk = false; }
+  }
 
   function model() {
     const by = C.buildByDate(S);
@@ -792,7 +798,21 @@
         if (!remoteChanged && !localChanged) sync.msg = 'Déjà à jour : le Drive (modifié le ' + fmtDT(f.modifiedTime) + (info.by ? ', envoyé depuis ' + (info.by === 'téléphone' ? 'le téléphone' : info.by === 'PC' ? 'le PC' : info.by) : '') + ') est identique à cet appareil.';
         else if (!remoteChanged) await up();
         else if (!localChanged) await down();
-        else sync.conflict = { remote: f.modifiedTime };
+        else {
+          /* Les deux côtés ont changé : on fusionne les deux versions (voir core.mergeSites), puis on envoie le résultat. */
+          try {
+            sync.msg = 'Fusion des deux versions…'; render();
+            const p = await (await dFetch(tok, 'https://www.googleapis.com/drive/v3/files/' + f.id + '?alt=media')).json();
+            if (!p || p.v !== 2 || !p.sites || !p.data) throw new Error('fichier du Drive illisible');
+            const le = Number(localStorage.getItem('conso-lastedit')) || Date.now();
+            const m = C.mergeSites(allData(), p, le > Date.parse(f.modifiedTime));
+            applyPayload(m);
+            const body = JSON.stringify(Object.assign({ v: 2, savedAt: new Date().toISOString(), device: devName() }, allData()));
+            const res = await dPut(tok, f.id, body);
+            setSyncInfo({ hash: hashStr(coreStr()), remote: res.modifiedTime, at: Date.now(), by: devName() });
+            sync.msg = 'Les modifications faites ici et sur le Drive ont été fusionnées (' + fmtDT(Date.now()) + ') : cet appareil et le Drive sont maintenant identiques.';
+          } catch (e2) { sync.conflict = { remote: f.modifiedTime }; sync.msg = ''; }
+        }
       }
       if (sync.conflict) sync.msg = '';
       else if (f && f.count > 1) sync.msg += ' Attention : ' + f.count + ' fichiers de sauvegarde trouvés sur le Drive, le plus récent est utilisé.';
