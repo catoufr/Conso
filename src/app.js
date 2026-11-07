@@ -28,7 +28,7 @@
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '29', APP_DATE = '6 novembre 2026';
+  const APP_VERSION = '30', APP_DATE = '6 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -739,8 +739,10 @@
     return r;
   }
   async function dFind(tok) {
-    const r = await dFetch(tok, 'https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=files(id,modifiedTime)&q=' + encodeURIComponent("name='" + DFILE + "'"));
-    const j = await r.json(); return j.files && j.files[0] ? j.files[0] : null;
+    const r = await dFetch(tok, 'https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=files(id,modifiedTime)&orderBy=' + encodeURIComponent('modifiedTime desc') + '&q=' + encodeURIComponent("name='" + DFILE + "'"));
+    const j = await r.json(); const arr = j.files || [];
+    if (!arr.length) return null;
+    arr[0].count = arr.length; return arr[0];
   }
   async function dPut(tok, id, body) {
     if (id) { const r = await dFetch(tok, 'https://www.googleapis.com/upload/drive/v3/files/' + id + '?uploadType=media&fields=id,modifiedTime', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body }); return r.json(); }
@@ -793,6 +795,7 @@
         else sync.conflict = { remote: f.modifiedTime };
       }
       if (sync.conflict) sync.msg = '';
+      else if (f && f.count > 1) sync.msg += ' Attention : ' + f.count + ' fichiers de sauvegarde trouvés sur le Drive, le plus récent est utilisé.';
     } catch (e) { sync.msg = syncErr(e); }
     sync.busy = false; render();
   }
