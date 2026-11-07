@@ -961,52 +961,7 @@ nav.tabs button{position:relative}
     return out;
   }
 
-  /* ---------- fusion de deux sauvegardes (synchro Drive, quand les deux côtés ont changé) ---------- */
-  const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
-  /* a = version la plus ancienne, b = la plus récente. Dictionnaires : union (la plus récente gagne en cas de désaccord) ;
-     listes d'éléments à identifiant : fusion par identifiant ; mesures : union ; autres listes : la plus récente ; valeurs : la plus récente. */
-  function deepMerge(a, b, key) {
-    if (b === undefined) return a;
-    if (a === undefined) return b;
-    if (isObj(a) && isObj(b)) {
-      const out = {};
-      for (const k of Object.keys(a)) out[k] = a[k];
-      for (const k of Object.keys(b)) out[k] = k in a ? deepMerge(a[k], b[k], k) : b[k];
-      return out;
-    }
-    if (Array.isArray(a) && Array.isArray(b)) {
-      if (key === 'eqMeas') {
-        const seen = new Set(a.map((x) => JSON.stringify(x))), out = a.slice();
-        for (const x of b) { const j = JSON.stringify(x); if (!seen.has(j)) { seen.add(j); out.push(x); } }
-        return out;
-      }
-      const withId = (l) => l.every((x) => isObj(x) && x.id !== undefined);
-      if (withId(a) && withId(b)) {
-        const out = a.map((x) => { const y = b.find((z) => z.id === x.id); return y ? deepMerge(x, y, '') : x; });
-        for (const y of b) if (!a.some((x) => x.id === y.id)) out.push(y);
-        return out;
-      }
-      return b;
-    }
-    return b;
-  }
-  /* local, remote : { sites:{list,cur}, data:{id: état} } ; localNewer : les modifications locales sont les plus récentes. */
-  function mergeSites(local, remote, localNewer) {
-    const list = [], ids = new Set(), data = {};
-    const newerL = localNewer ? local.sites.list : remote.sites.list, olderL = localNewer ? remote.sites.list : local.sites.list;
-    for (const s of olderL.concat(newerL)) {
-      const n = newerL.find((x) => x.id === s.id) || s;
-      if (!ids.has(s.id)) { ids.add(s.id); list.push({ id: s.id, name: n.name }); }
-    }
-    for (const s of list) {
-      const a = local.data[s.id], b = remote.data[s.id];
-      data[s.id] = a && b ? (localNewer ? deepMerge(b, a, '') : deepMerge(a, b, '')) : (a || b || null);
-    }
-    return { sites: { list, cur: local.sites.cur && ids.has(local.sites.cur) ? local.sites.cur : list[0].id }, data };
-  }
-
   const api = {
-    deepMerge, mergeSites,
     addDays, dow, frToIso, hm, fromMin, decode, parseCsv, parseIndex, parsePower, parsePmax, parsePmax, parseZip,
     defaultState, mergeImport, buildByDate, scheduleFor, hcMinutes, hcShare,
     dayStats, calibrate, rangesOf, allDates, periodStats, costFor, cmpKey,
@@ -1048,7 +1003,7 @@ nav.tabs button{position:relative}
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '31', APP_DATE = '6 novembre 2026';
+  const APP_VERSION = '32', APP_DATE = '7 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -1073,13 +1028,7 @@ nav.tabs button{position:relative}
     }
     return Object.assign(base, st);
   }
-  function save() {
-    try {
-      const k = siteKey(sites.cur), j = JSON.stringify(S);
-      if (localStorage.getItem(k) !== j) { localStorage.setItem(k, j); localStorage.setItem('conso-lastedit', String(Date.now())); }
-      storageOk = true;
-    } catch (e) { storageOk = false; }
-  }
+  function save() { try { localStorage.setItem(siteKey(sites.cur), JSON.stringify(S)); storageOk = true; } catch (e) { storageOk = false; } }
 
   function model() {
     const by = C.buildByDate(S);
@@ -1851,21 +1800,7 @@ nav.tabs button{position:relative}
         if (!remoteChanged && !localChanged) sync.msg = 'Déjà à jour : le Drive (modifié le ' + fmtDT(f.modifiedTime) + (info.by ? ', envoyé depuis ' + (info.by === 'téléphone' ? 'le téléphone' : info.by === 'PC' ? 'le PC' : info.by) : '') + ') est identique à cet appareil.';
         else if (!remoteChanged) await up();
         else if (!localChanged) await down();
-        else {
-          /* Les deux côtés ont changé : on fusionne les deux versions (voir core.mergeSites), puis on envoie le résultat. */
-          try {
-            sync.msg = 'Fusion des deux versions…'; render();
-            const p = await (await dFetch(tok, 'https://www.googleapis.com/drive/v3/files/' + f.id + '?alt=media')).json();
-            if (!p || p.v !== 2 || !p.sites || !p.data) throw new Error('fichier du Drive illisible');
-            const le = Number(localStorage.getItem('conso-lastedit')) || Date.now();
-            const m = C.mergeSites(allData(), p, le > Date.parse(f.modifiedTime));
-            applyPayload(m);
-            const body = JSON.stringify(Object.assign({ v: 2, savedAt: new Date().toISOString(), device: devName() }, allData()));
-            const res = await dPut(tok, f.id, body);
-            setSyncInfo({ hash: hashStr(coreStr()), remote: res.modifiedTime, at: Date.now(), by: devName() });
-            sync.msg = 'Les modifications faites ici et sur le Drive ont été fusionnées (' + fmtDT(Date.now()) + ') : cet appareil et le Drive sont maintenant identiques.';
-          } catch (e2) { sync.conflict = { remote: f.modifiedTime }; sync.msg = ''; }
-        }
+        else sync.conflict = { remote: f.modifiedTime };
       }
       if (sync.conflict) sync.msg = '';
       else if (f && f.count > 1) sync.msg += ' Attention : ' + f.count + ' fichiers de sauvegarde trouvés sur le Drive, le plus récent est utilisé.';
