@@ -483,7 +483,7 @@
     h += siteCard();
     h += `<div class="card"><h2>Affichage</h2><label class="f">Choix des heures<select id="timemode" data-ch="timemode"><option value="native"${prefs().timeList ? '' : ' selected'}>Sélecteur d'heure du téléphone</option><option value="list"${prefs().timeList ? ' selected' : ''}>Liste d'heures (si les boutons du sélecteur sont coupés)</option></select></label></div>`;
     const eqOpts = S.equip.length > 1 && ui.cat !== 'edf' ? `<label class="f" style="margin-top:10px">Équipement concerné par une recharge VE<select id="veeq" data-ch="veeq"><option value="">Choisi automatiquement</option>${S.equip.map((e) => `<option value="${e.id}"${ui.veEq === e.id ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>` : '';
-    h += `<div class="card"><h2>Importer</h2><label class="f" style="margin-bottom:10px">Catégorie du fichier<select id="cat" data-ch="cat"><option value="auto"${ui.cat === 'auto' ? ' selected' : ''}>Détection automatique</option><option value="edf"${ui.cat === 'edf' ? ' selected' : ''}>EDF / distributeur (zip ou CSV)</option><option value="ve"${ui.cat === 've' ? ' selected' : ''}>Recharge VE (export du chargeur)</option></select></label>${eqOpts}<label class="row" style="gap:8px;margin-top:10px"><input type="checkbox" id="force" ${ui.force ? 'checked' : ''} data-ch="force"><span class="small">Écraser aussi mes croix forcées à la main (recharge VE)</span></label><label class="f" style="margin-top:10px">Un zip d'export, ou des fichiers CSV<input type="file" id="files" multiple data-ch="files"></label>
+    h += `<div class="card"><h2>Importer</h2><div class="row" style="margin-bottom:6px"><button class="btn" data-act="drvenedis"${sync.rbusy ? ' disabled' : ''}>Récupérer le dernier fichier Enedis (Drive)</button></div><p class="note" style="margin-top:0;margin-bottom:12px">Cherche conso-enedis.json sur ton Drive (déposé par le script du PC) et l'importe. Google te demande l'autorisation de lire ton Drive la première fois.</p><label class="f" style="margin-bottom:10px">Catégorie du fichier<select id="cat" data-ch="cat"><option value="auto"${ui.cat === 'auto' ? ' selected' : ''}>Détection automatique</option><option value="edf"${ui.cat === 'edf' ? ' selected' : ''}>EDF / distributeur (zip ou CSV)</option><option value="ve"${ui.cat === 've' ? ' selected' : ''}>Recharge VE (export du chargeur)</option></select></label>${eqOpts}<label class="row" style="gap:8px;margin-top:10px"><input type="checkbox" id="force" ${ui.force ? 'checked' : ''} data-ch="force"><span class="small">Écraser aussi mes croix forcées à la main (recharge VE)</span></label><label class="f" style="margin-top:10px">Un zip d'export, ou des fichiers CSV<input type="file" id="files" multiple data-ch="files"></label>
       <details open style="margin-top:10px"><summary class="small">Si « Choisir un fichier » ne réagit pas : coller le texte d'un CSV</summary><label class="f" style="margin-top:8px">Contenu du CSV (ouvre-le dans une appli de fichiers, copie tout, colle ici)<textarea id="pastecsv" placeholder="Nom,Heure,Début :,Fin :…"></textarea></label><div class="row" style="margin-top:8px"><button class="btn" data-act="pastecsv">Importer ce texte</button></div></details><p class="note">Chaque fichier est reconnu tout seul, zip compris. Choisir la catégorie évite qu'un fichier soit rangé au mauvais endroit. Réimporter met à jour les valeurs sans créer de doublons, et tes corrections manuelles sont conservées. Pour la recharge VE : une recharge courte coche seulement ses créneaux ; une recharge longue (prise restée branchée) coche les créneaux de la règle de l'équipement dans sa fenêtre, avec un avis « cohérent » ou « peu probable » ; un jour sans recharge n'a pas de croix. Tes croix forcées à la main (cadenas) sont protégées ; coche « Écraser » pour les remplacer.</p>${ui.msg ? `<div class="msg">${esc(ui.msg)}</div>` : ''}</div>`;
     h += `<div class="card"><h2>Données en mémoire</h2><div class="list">
       <div class="item"><span>Créneaux à la demi-heure</span><span class="num">${nSl}</span></div>
@@ -738,6 +738,39 @@
       });
       tc.requestAccessToken({ prompt: '' });
     });
+  }
+  /* Lecture du Drive (v31) : autorisation demandée seulement quand on touche « Récupérer… ». */
+  const RSCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+  function gTokenRead() {
+    if (sync.rtok && Date.now() < sync.rexp) return Promise.resolve(sync.rtok);
+    return new Promise((resolve, reject) => {
+      const tc = google.accounts.oauth2.initTokenClient({
+        client_id: GCLIENT, scope: RSCOPE,
+        callback: (r) => { if (r && r.access_token) { sync.rtok = r.access_token; sync.rexp = Date.now() + ((r.expires_in || 3600) - 120) * 1000; resolve(sync.rtok); } else reject(new Error((r && (r.error_description || r.error)) || 'auth')); },
+        error_callback: (e) => reject(new Error((e && e.type) || 'auth')),
+      });
+      tc.requestAccessToken({ prompt: '' });
+    });
+  }
+  async function importFromDrive() {
+    if (sync.rbusy) return;
+    sync.rbusy = true; ui.msg = 'Connexion à Google…'; render();
+    try {
+      await loadGsi(); const tok = await gTokenRead();
+      ui.msg = 'Recherche du fichier sur le Drive…'; render();
+      const q = "name='conso-enedis.json' and trashed=false";
+      const r = await dFetch(tok, 'https://www.googleapis.com/drive/v3/files?pageSize=1&orderBy=' + encodeURIComponent('modifiedTime desc') + '&fields=files(id,name,modifiedTime)&q=' + encodeURIComponent(q));
+      const j = await r.json(); const f = (j.files || [])[0];
+      if (!f) ui.msg = 'Aucun fichier conso-enedis.json trouvé sur ton Drive. Vérifie que le script du PC l\'a bien copié dans le dossier « Conso » et que Google Drive pour ordinateur a fini de se synchroniser.';
+      else {
+        const buf = await (await dFetch(tok, 'https://www.googleapis.com/drive/v3/files/' + f.id + '?alt=media')).arrayBuffer();
+        await importFiles([{ name: 'conso-enedis.json (Drive, modifié le ' + fmtDT(f.modifiedTime) + ')', __buf: buf }]);
+      }
+    } catch (e) {
+      const m = String((e && e.message) || e);
+      ui.msg = /invalid_scope|admin_policy|access_denied|scope/i.test(m) ? 'Google n\'a pas accordé la lecture du Drive (' + m + '). Si c\'est la première fois, l\'autorisation « lecture du Drive » n\'est peut-être pas encore ajoutée dans le projet Google Cloud.' : syncErr(e);
+    }
+    sync.rbusy = false; render();
   }
   async function dFetch(tok, url, opt) {
     const r = await fetch(url, Object.assign({}, opt, { headers: Object.assign({ Authorization: 'Bearer ' + tok }, (opt && opt.headers) || {}) }));
@@ -1072,6 +1105,7 @@
       render();
     }
     else if (a === 'applycal') { S.shift = Number(el.dataset.v); save(); render(); }
+    else if (a === 'drvenedis') importFromDrive();
     else if (a === 'sync') doSync('auto');
     else if (a === 'syncup') doSync('up');
     else if (a === 'syncdown') doSync('down');
