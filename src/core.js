@@ -414,7 +414,17 @@
 
   /* ---------- équipements ---------- */
   /* mode : 'h24' (en continu), 'hc' (heures creuses), 'hp' (heures pleines), 'range' (plage horaire + jours). */
-  function eqRuleOn(eq, date, min, share) {
+  /* Règles précédentes d'un équipement (eq.past = [{until:'AAAA-MM-JJ HH:MM', mode, ranges, days}], dans l'ordre) :
+     avant « until », c'est cette ancienne règle qui s'applique ; après la dernière, la règle actuelle de l'équipement. */
+  function ruleAt(eq, date, min) {
+    if (eq.past && eq.past.length) {
+      const k = date + ' ' + fromMin(min);
+      for (const p of eq.past) if (k < p.until) return p;
+    }
+    return eq;
+  }
+  function eqRuleOn(eq0, date, min, share) {
+    const eq = ruleAt(eq0, date, min);
     if (eq.mode === 'h24') return true;
     if (eq.mode === 'hc') return share >= 0.5;
     if (eq.mode === 'hp') return share < 0.5;
@@ -802,7 +812,7 @@
     addDays, dow, frToIso, hm, fromMin, decode, parseCsv, parseIndex, parsePower, parsePmax, parsePmax, parseZip,
     defaultState, mergeImport, buildByDate, scheduleFor, hcMinutes, hcShare,
     dayStats, calibrate, rangesOf, allDates, periodStats, costFor, cmpKey,
-    avgPowers, eqLocked, setLock, parseVe, importVe, applyVeRules, veWindow, crossCheck, spanOf, spanKeys, eqRuleOn, eqRanges, eqSet, looseSlots, suggestFor, eqOn, setEqOn, slotRows, hoursBetween, measuredW, estimate, powers, splitSlot, slotPrice, attribute,
+    avgPowers, eqLocked, setLock, parseVe, importVe, applyVeRules, veWindow, crossCheck, spanOf, spanKeys, eqRuleOn, eqRanges, ruleAt, eqSet, looseSlots, suggestFor, eqOn, setEqOn, slotRows, hoursBetween, measuredW, estimate, powers, splitSlot, slotPrice, attribute,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Core = api;

@@ -28,7 +28,7 @@
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '33', APP_DATE = '8 novembre 2026';
+  const APP_VERSION = '34', APP_DATE = '8 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -557,6 +557,25 @@
   /* ---------- équipements ---------- */
   const MODES = { h24: 'En continu (24 h/24)', hc: 'Heures creuses', hp: 'Heures pleines', range: 'Plages répétitives', manual: 'Sans plage fixe' };
   const MODE_SHORT = { h24: '24 h/24', hc: 'Heures creuses', hp: 'Heures pleines', range: 'Plages', manual: 'Sans plage fixe' };
+  /* Règle à partir d'une date : on garde l'ancienne règle pour le passé, la règle actuelle (modifiable ci-dessus) vaut pour la suite. */
+  function ruleText(r) {
+    const mode = MODES[r.mode] || r.mode;
+    const rs = r.mode === 'range' ? C.eqRanges(r).map((x) => x.from + '–' + x.to).join(', ') : '';
+    return mode + (rs ? ' : ' + rs : '');
+  }
+  function pastBlock(e) {
+    const past = e.past || [];
+    const dt = (u) => dmyFull(u.slice(0, 10)) + ' à ' + u.slice(11);
+    const open = ui.rv === e.id;
+    return `<div style="grid-column:1/-1;margin-top:4px">
+      ${past.length ? `<div class="small muted" style="margin-bottom:4px">Règles précédentes de cet équipement :</div>${past.map((p, i) => `<div class="eqrow"><span class="grow small">Avant le ${dt(p.until)} : ${esc(ruleText(p))}</span><button class="iconbtn" style="width:34px;height:34px;font-size:15px;flex:none" data-act="rvdel" data-id="${e.id}" data-i="${i}" aria-label="Supprimer cette règle précédente">×</button></div>`).join('')}<div class="small muted" style="margin:4px 0">La règle affichée ci-dessus s'applique à partir du ${past.length ? dt(past[past.length - 1].until) : 'début'}.</div>` : ''}
+      ${open ? `<div class="warn"><div class="small">À partir de quand la nouvelle règle doit-elle s'appliquer ? L'ancienne règle est gardée pour tout ce qui précède. Après avoir validé, modifie la règle ci-dessus.</div>
+        <div class="grid2" style="margin-top:8px"><label class="f">Date<input type="date" id="rvd-${e.id}" value="${todayIso()}"></label><label class="f">Heure${tsel(`id="rvt-${e.id}"`, '00:00', 30)}</label></div>
+        ${ui.rvmsg ? `<div class="msg" style="margin-top:8px">${esc(ui.rvmsg)}</div>` : ''}
+        <div class="row" style="margin-top:8px;gap:8px"><button class="btn" data-act="rvok" data-id="${e.id}">Valider la date</button><button class="btn ghost" data-act="rvopen" data-id="${e.id}">Annuler</button></div></div>`
+      : `<button class="btn ghost" data-act="rvopen" data-id="${e.id}">Changer la règle à partir d'une date…</button>`}
+    </div>`;
+  }
   function rangesOf(e) {
     if (!e.ranges) { e.ranges = C.eqRanges(e).map((r) => ({ from: r.from, to: r.to })); delete e.from; delete e.to; }
     return e.ranges;
@@ -645,6 +664,7 @@
           return `<div class="rgblock"><div class="rg"><span class="tag">Plage ${i + 1}</span>${tsel(`id="rf-${e.id}-${i}" data-ch="rfrom" data-id="${e.id}" data-i="${i}" aria-label="Début plage ${i + 1}"`, r.from, 15)}${tsel(`id="rt-${e.id}-${i}" data-ch="rto" data-id="${e.id}" data-i="${i}" aria-label="Fin plage ${i + 1}"`, r.to, 15, false, true)}<button class="iconbtn" style="width:34px;height:34px;font-size:15px;flex:none" data-act="delrange" data-id="${e.id}" data-i="${i}" aria-label="Supprimer la plage ${i + 1}">×</button></div>
           <div class="row" style="gap:6px;margin-top:6px" role="group" aria-label="Jours de la plage ${i + 1}">${DAYS_ORDER.map(([d, l]) => `<label class="dchip"><input type="checkbox" id="rd-${e.id}-${i}-${d}" ${rd.includes(d) ? 'checked' : ''} data-ch="rday" data-id="${e.id}" data-i="${i}" data-d="${d}"><span>${l}</span></label>`).join('')}</div></div>`;
         }).join('')}<div><button class="btn ghost" data-act="addrange" data-id="${e.id}">+ Ajouter une plage</button></div></div>` : ''}
+        ${pastBlock(e)}
       </div>
       <p class="note">${info}</p>
       ${(pw.src === 'estimée' || pw.src === 'max') && pw.w >= 1 ? `<div class="row" style="margin-top:8px"><button class="btn ghost" data-act="usew" data-id="${e.id}" data-w="${Math.round(pw.w)}">Fixer à ${Math.round(pw.w)} W</button></div>` : ''}
@@ -1054,6 +1074,19 @@
       }
     }
     else if (a === 'eqlock') { C.setLock(S, el.dataset.eq, el.dataset.key, false); save(); render(); }
+    else if (a === 'rvopen') { ui.rv = ui.rv === el.dataset.id ? null : el.dataset.id; ui.rvmsg = ''; render(); }
+    else if (a === 'rvdel') { const e = S.equip.find((x) => x.id === el.dataset.id); if (e && e.past) { e.past.splice(Number(el.dataset.i), 1); if (!e.past.length) delete e.past; save(); render(); } }
+    else if (a === 'rvok') {
+      const e = S.equip.find((x) => x.id === el.dataset.id);
+      const d = document.getElementById('rvd-' + el.dataset.id), t = document.getElementById('rvt-' + el.dataset.id);
+      if (e && d && d.value && t && t.value) {
+        const until = d.value + ' ' + t.value, last = e.past && e.past.length ? e.past[e.past.length - 1].until : '';
+        if (last && until <= last) { ui.rvmsg = 'Choisis une date après le ' + dmyFull(last.slice(0, 10)) + ' à ' + last.slice(11) + ' (la dernière date déjà enregistrée).'; render(); return; }
+        const snap = { until, mode: e.mode, days: e.days ? e.days.slice() : [], ranges: JSON.parse(JSON.stringify(C.eqRanges(e))) };
+        e.past = (e.past || []).concat([snap]);
+        ui.rv = null; ui.rvmsg = ''; save(); render();
+      }
+    }
     else if (a === 'addrange') { const e = S.equip.find((x) => x.id === el.dataset.id); if (e) { { const rs = rangesOf(e), last = rs[rs.length - 1]; rs.push({ from: '12:00', to: '14:00', days: last && last.days ? last.days.slice() : e.days && e.days.length ? e.days.slice() : [0, 1, 2, 3, 4, 5, 6] }); } save(); render(); } }
     else if (a === 'delrange') { const e = S.equip.find((x) => x.id === el.dataset.id); if (e) { const r = rangesOf(e); r.splice(Number(el.dataset.i), 1); if (!r.length) r.push({ from: '18:00', to: '22:00' }); save(); render(); } }
     else if (a === 'pastecsv') {
