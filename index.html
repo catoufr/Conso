@@ -1003,7 +1003,7 @@ nav.tabs button{position:relative}
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '32', APP_DATE = '7 novembre 2026';
+  const APP_VERSION = '33', APP_DATE = '8 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -1387,7 +1387,7 @@ nav.tabs button{position:relative}
         if (!on && cur) { cur.b = min; runs.push(cur); cur = null; }
       }
       if (cur) { cur.b = 1440; runs.push(cur); }
-      const t = (x) => z(Math.floor((x % 1440) / 60)) + ':' + z(x % 60);
+      const t = (x) => (x >= 1440 ? '24:00' : z(Math.floor(x / 60)) + ':' + z(x % 60));
       return `<div class="item"><span>${esc(e.name)}</span><span class="num small" style="text-align:right">${runs.length ? runs.map((r) => `${t(r.a)} → ${t(r.b)}${r.locked ? ' 🔒' : ''}`).join('<br>') : '<span class="muted">aucune plage</span>'}</span></div>`;
     });
     return `<div class="card"><h2>Équipements ce jour</h2><div class="list">${rows.join('')}</div><p class="note">🔒 : plage forcée par toi. Les autres viennent de la règle de l'équipement. Modifie-les avec la carte ci-dessous.</p></div>`;
