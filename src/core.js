@@ -780,6 +780,7 @@
     const sp = splitSlot(state, row, pw);
     for (const e of state.equip || []) {
       if (e.mode === 'h24' || e.rest || eqOn(state, e, row.key, row.share) || eqSet(state, e, row.key) !== null) continue;
+      if (ruleAt(e, row.key.slice(0, 10), hm(row.key.slice(11, 16))).mode === 'off') continue; /* période « éteint » : aucune proposition */
       if (lo && lo[e.id]) return e.id;
       if (e.mode !== 'manual') continue; /* une plage est une tendance : pas de suggestion hors plage, sauf exception indiquée par l'utilisateur */
       const w = (pw[e.id] || {}).w || 0;

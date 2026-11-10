@@ -943,6 +943,7 @@ nav.tabs button{position:relative}
     const sp = splitSlot(state, row, pw);
     for (const e of state.equip || []) {
       if (e.mode === 'h24' || e.rest || eqOn(state, e, row.key, row.share) || eqSet(state, e, row.key) !== null) continue;
+      if (ruleAt(e, row.key.slice(0, 10), hm(row.key.slice(11, 16))).mode === 'off') continue; /* période « éteint » : aucune proposition */
       if (lo && lo[e.id]) return e.id;
       if (e.mode !== 'manual') continue; /* une plage est une tendance : pas de suggestion hors plage, sauf exception indiquée par l'utilisateur */
       const w = (pw[e.id] || {}).w || 0;
@@ -1015,7 +1016,7 @@ nav.tabs button{position:relative}
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '36', APP_DATE = '10 novembre 2026';
+  const APP_VERSION = '37', APP_DATE = '10 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -1543,11 +1544,12 @@ nav.tabs button{position:relative}
 
   /* ---------- équipements ---------- */
   const MODES = { h24: 'En continu (24 h/24)', hc: 'Heures creuses', hp: 'Heures pleines', range: 'Plages répétitives', manual: 'Sans plage fixe' };
-  const MODE_SHORT = { h24: '24 h/24', hc: 'Heures creuses', hp: 'Heures pleines', range: 'Plages', manual: 'Sans plage fixe' };
+  const PMODES = Object.assign({}, MODES, { off: 'Éteint : ne fonctionne pas' });
+  const MODE_SHORT = { h24: '24 h/24', hc: 'Heures creuses', hp: 'Heures pleines', range: 'Plages', manual: 'Sans plage fixe', off: 'Éteint' };
   /* Changer la règle d'un équipement pour une période : à partir de maintenant (défaut), tout l'historique, ou du jour A au jour B.
      eq.periods = [{from, to, mode, days, ranges}] ('AAAA-MM-JJ HH:MM', fin exclue, vide = sans limite) ; la dernière période créée l'emporte. */
   function ruleText(r) {
-    const mode = MODES[r.mode] || r.mode;
+    const mode = PMODES[r.mode] || r.mode;
     const rs = r.mode === 'range' ? C.eqRanges(r).map((x) => x.from + '–' + x.to).join(', ') : '';
     return mode + (rs ? ' : ' + rs : '');
   }
@@ -1559,7 +1561,7 @@ nav.tabs button{position:relative}
       ranges: JSON.parse(JSON.stringify(C.eqRanges(r))).map((x) => ({ from: x.from, to: x.to, days: x.days ? x.days.slice() : null })) };
   }
   function rvInitBulk() {
-    return { id: '*', targets: [], scope: 'range', from: todayIso(), to: '', warn: false, msg: '', mode: 'manual', days: [0, 1, 2, 3, 4, 5, 6], ranges: [] };
+    return { id: '*', targets: [], scope: 'range', from: todayIso(), to: '', warn: false, msg: '', mode: 'off', days: [0, 1, 2, 3, 4, 5, 6], ranges: [] };
   }
   function rvForm(e) {
     const f = ui.rvf, today = todayIso();
@@ -1571,8 +1573,8 @@ nav.tabs button{position:relative}
       <div style="margin-top:6px">${[['now', 'À partir de maintenant (le passé ne change pas)'], ['all', 'Tout l\'historique (passé compris)'], ['range', 'Une période choisie (du jour … au jour …)']].map(([v, l]) => `<label class="row" style="gap:8px;margin-top:4px"><input type="radio" name="rvs-${e.id}" ${f.scope === v ? 'checked' : ''} data-ch="rvf-scope" data-v="${v}"><span class="small">${l}</span></label>`).join('')}</div>
       ${f.scope === 'range' ? `<div class="grid2" style="margin-top:8px"><label class="f">Du<input type="date" value="${f.from}" data-ch="rvf-from"></label><label class="f">Au (inclus, facultatif)<input type="date" value="${f.to}" data-ch="rvf-to"></label></div>` : ''}
       <div class="small" style="margin-top:12px"><b>Nouvelle règle</b></div>
-      <label class="f" style="margin-top:4px">Fonctionnement<select data-ch="rvf-mode">${Object.entries(MODES).map(([k, v]) => `<option value="${k}"${f.mode === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
-      ${bulk && f.mode === 'manual' ? '<div class="small muted" style="margin-top:6px">« Sans plage fixe » : l\'équipement n\'est pas compté en route sur cette période (pratique pour des vacances).</div>' : ''}
+      <label class="f" style="margin-top:4px">Fonctionnement<select data-ch="rvf-mode">${Object.entries(PMODES).map(([k, v]) => `<option value="${k}"${f.mode === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+      ${f.mode === 'off' ? '<div class="small muted" style="margin-top:6px">« Éteint » : sur cette période l\'équipement ne fonctionne pas, aucune croix ni proposition (pratique pour des vacances). Les croix que tu as forcées à la main restent.</div>' : ''}
       ${f.mode === 'range' ? `<div class="ranges" style="margin-top:6px">${f.ranges.map((r, i) => `<div class="rgblock"><div class="rg"><span class="tag">Plage ${i + 1}</span>${tsel(`data-ch="rvf-rf" data-i="${i}" aria-label="Début plage ${i + 1}"`, r.from, 15)}${tsel(`data-ch="rvf-rt" data-i="${i}" aria-label="Fin plage ${i + 1}"`, r.to, 15, false, true)}<button class="iconbtn" style="width:34px;height:34px;font-size:15px;flex:none" data-act="rvf-delrange" data-i="${i}" aria-label="Supprimer la plage ${i + 1}">×</button></div>
         <div class="row" style="gap:6px;margin-top:6px">${DAYS_ORDER.map(([d, l]) => `<label class="dchip"><input type="checkbox" ${rd(r).includes(d) ? 'checked' : ''} data-ch="rvf-rd" data-i="${i}" data-d="${d}"><span>${l}</span></label>`).join('')}</div></div>`).join('')}<div><button class="btn ghost" data-act="rvf-addrange">+ Ajouter une plage</button></div></div>` : ''}
       ${f.msg ? `<div class="msg" style="margin-top:8px">${esc(f.msg)}</div>` : ''}
@@ -1687,7 +1689,7 @@ nav.tabs button{position:relative}
       <summary class="foldh"><div class="grow"><h3>${esc(e.name)}</h3><div class="row" style="gap:8px;margin-top:3px;flex-wrap:nowrap"><span class="tag">${MODE_SHORT[e.mode] || e.mode}</span><span class="num muted small">${pw.src === 'variable' ? 'variable' : pw.w >= 1 ? Math.round(pw.w) + ' W' : ''}</span></div></div></summary>
       <div class="grid2" style="margin-top:10px">
         <label class="f" style="grid-column:1/-1">Nom<input id="en-${e.id}" value="${esc(e.name)}" data-ch="ename" data-id="${e.id}"></label>
-        <label class="f" style="grid-column:1/-1">Fonctionnement<select id="em-${e.id}" data-ch="emode" data-id="${e.id}">${Object.entries(MODES).map(([k, v]) => `<option value="${k}"${e.mode === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+        <label class="f" style="grid-column:1/-1">Fonctionnement<select id="em-${e.id}" data-ch="emode" data-id="${e.id}">${Object.entries(PMODES).map(([k, v]) => `<option value="${k}"${e.mode === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
         ${e.rest ? '' : `<label class="f">Puissance (W, facultatif)<input id="ew-${e.id}" inputmode="decimal" value="${e.watts > 0 ? e.watts : ''}" placeholder="${pw.w ? Math.round(pw.w) : ''}" data-ch="ewatts" data-id="${e.id}"></label>`}
         ${e.mode !== 'h24' ? `<label class="row" style="grid-column:1/-1;gap:8px;align-items:flex-start"><input type="checkbox" id="er-${e.id}" ${e.rest ? 'checked' : ''} data-ch="erest" data-id="${e.id}" style="margin-top:3px"><span class="small">Puissance variable : prend ce qui reste (cuisson, bricolage…)</span></label>` : ''}
         ${e.rest ? '' : `<label class="row" style="grid-column:1/-1;gap:8px;align-items:flex-start"><input type="checkbox" id="ep-${e.id}" ${e.prio === true || (e.mode === 'h24' && e.prio !== false) ? 'checked' : ''} data-ch="eprio" data-id="${e.id}" style="margin-top:3px"><span class="small">Valeur prioritaire : ma valeur (ou la moyenne estimée) est respectée, les autres équipements s'ajustent autour</span></label>`}
