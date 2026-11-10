@@ -28,7 +28,7 @@
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '37', APP_DATE = '10 novembre 2026';
+  const APP_VERSION = '38', APP_DATE = '10 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -324,14 +324,13 @@
     if (!hasData(m)) return header() + empty();
     if (!ui.day) ui.day = todayIso();
     const d = ui.day, i = m.dates.indexOf(d), has = i >= 0;
-    const maxDay = todayIso() > m.dates[m.dates.length - 1] ? todayIso() : m.dates[m.dates.length - 1];
     const st = has ? C.dayStats(S, m.by, d) : null, sl = m.by[d];
     const wd = JOURS[C.dow(d)];
     let h = '<div class="stick">' + header(wd + ' ' + dmyFull(d), true);
     h += `<div class="daynav"><button class="iconbtn" data-act="dayprev" aria-label="Jour précédent" ${d <= m.dates[0] ? 'disabled' : ''}>‹</button>
-      <input type="date" id="dayin" value="${d}" min="${m.dates[0]}" max="${maxDay}" data-ch="dayin" aria-label="Choisir un jour">
-      <button class="iconbtn" data-act="daynext" aria-label="Jour suivant" ${d >= maxDay ? 'disabled' : ''}>›</button></div></div>`;
-    if (!has) return h + `<div class="card"><p class="muted">Pas de relevé EDF pour le ${dmyFull(d)}. Tu peux quand même indiquer quels équipements ont tourné : ces plages serviront aux estimations dès que les données arriveront.</p></div>` + dayEquipCard(d) + assignCard(m);
+      <input type="date" id="dayin" value="${d}" min="${m.dates[0]}" data-ch="dayin" aria-label="Choisir un jour">
+      <button class="iconbtn" data-act="daynext" aria-label="Jour suivant">›</button></div></div>`;
+    if (!has) return h + `<div class="card"><p class="muted">${d > todayIso() ? 'Jour à venir : pas encore de relevé EDF.' : 'Pas de relevé EDF pour le ' + dmyFull(d) + '.'} Tu peux quand même indiquer quels équipements ont tourné : ces plages serviront aux estimations dès que les données arriveront.</p></div>` + dayEquipCard(d) + assignCard(m);
     const cr = C.costFor(m.ref, [st]);
     h += `<div class="card"><div class="stats" style="margin:0;padding:0;border:0"><div class="stat"><div class="v">${f1(st.kwh)} kWh</div><div class="l">Total du jour</div></div>
       <div class="stat"><div class="v" style="color:var(--hp)">${f1(st.hp)}</div><div class="l"><span class="dot hp"></span>HP</div></div>
@@ -1045,7 +1044,7 @@
     else if (a === 'bucket') { ui.bsel = ui.bsel === el.dataset.k ? null : el.dataset.k; render(); }
     else if (a === 'preset') { ui.bsel = null; ui.preset = el.dataset.v; if (ui.preset === 'custom' && !ui.from) { const m = model(); if (m.p) { ui.from = m.p.from; ui.to = m.p.to; } } render(); }
     else if (a === 'goday') { ui.day = el.dataset.date; ui.sel = null; go('jour'); }
-    else if (a === 'dayprev' || a === 'daynext') { const m = model(), i = m.dates.indexOf(ui.day) + (a === 'dayprev' ? -1 : 1); if (m.dates.length) { const nd = C.addDays(ui.day, a === 'dayprev' ? -1 : 1), top = todayIso() > m.dates[m.dates.length - 1] ? todayIso() : m.dates[m.dates.length - 1]; if (nd >= m.dates[0] && nd <= top) { ui.day = nd; ui.sel = null; render(); } } }
+    else if (a === 'dayprev' || a === 'daynext') { const m = model(), i = m.dates.indexOf(ui.day) + (a === 'dayprev' ? -1 : 1); if (m.dates.length) { const nd = C.addDays(ui.day, a === 'dayprev' ? -1 : 1); if (nd >= m.dates[0]) { ui.day = nd; ui.sel = null; render(); } } }
     else if (a === 'unxgo') {
       const m = model(), h = Math.floor(Number(el.dataset.i) / 2);
       if (m.p) {
