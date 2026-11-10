@@ -28,7 +28,7 @@
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '38', APP_DATE = '10 novembre 2026';
+  const APP_VERSION = '39', APP_DATE = '10 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -330,7 +330,7 @@
     h += `<div class="daynav"><button class="iconbtn" data-act="dayprev" aria-label="Jour précédent" ${d <= m.dates[0] ? 'disabled' : ''}>‹</button>
       <input type="date" id="dayin" value="${d}" min="${m.dates[0]}" data-ch="dayin" aria-label="Choisir un jour">
       <button class="iconbtn" data-act="daynext" aria-label="Jour suivant">›</button></div></div>`;
-    if (!has) return h + `<div class="card"><p class="muted">${d > todayIso() ? 'Jour à venir : pas encore de relevé EDF.' : 'Pas de relevé EDF pour le ' + dmyFull(d) + '.'} Tu peux quand même indiquer quels équipements ont tourné : ces plages serviront aux estimations dès que les données arriveront.</p></div>` + dayEquipCard(d) + assignCard(m);
+    if (!has) return h + `<div class="card"><p class="muted">${d > todayIso() ? 'Jour à venir : pas encore de relevé EDF.' : 'Pas de relevé EDF pour le ' + dmyFull(d) + '.'} ${d > todayIso() ? 'Tu peux déjà planifier les équipements de ce jour (par exemple une absence) avec la carte ci-dessous.' : 'Tu peux quand même indiquer quels équipements ont tourné : ces plages serviront aux estimations dès que les données arriveront.'}</p></div>` + dayEquipCard(d) + assignCard(m);
     const cr = C.costFor(m.ref, [st]);
     h += `<div class="card"><div class="stats" style="margin:0;padding:0;border:0"><div class="stat"><div class="v">${f1(st.kwh)} kWh</div><div class="l">Total du jour</div></div>
       <div class="stat"><div class="v" style="color:var(--hp)">${f1(st.hp)}</div><div class="l"><span class="dot hp"></span>HP</div></div>
