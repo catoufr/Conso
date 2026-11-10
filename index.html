@@ -580,9 +580,11 @@ nav.tabs button{position:relative}
   /* Règles précédentes d'un équipement (eq.past = [{until:'AAAA-MM-JJ HH:MM', mode, ranges, days}], dans l'ordre) :
      avant « until », c'est cette ancienne règle qui s'applique ; après la dernière, la règle actuelle de l'équipement. */
   function ruleAt(eq, date, min) {
-    if (eq.past && eq.past.length) {
+    if ((eq.periods && eq.periods.length) || (eq.past && eq.past.length)) {
       const k = date + ' ' + fromMin(min);
-      for (const p of eq.past) if (k < p.until) return p;
+      /* périodes choisies (la dernière créée l'emporte), puis anciennes règles « avant le… » */
+      if (eq.periods) for (let i = eq.periods.length - 1; i >= 0; i--) { const p = eq.periods[i]; if ((!p.from || k >= p.from) && (!p.to || k < p.to)) return p; }
+      if (eq.past) for (const p of eq.past) if (k < p.until) return p;
     }
     return eq;
   }
@@ -1013,7 +1015,7 @@ nav.tabs button{position:relative}
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '34', APP_DATE = '8 novembre 2026';
+  const APP_VERSION = '35', APP_DATE = '10 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -1542,24 +1544,59 @@ nav.tabs button{position:relative}
   /* ---------- équipements ---------- */
   const MODES = { h24: 'En continu (24 h/24)', hc: 'Heures creuses', hp: 'Heures pleines', range: 'Plages répétitives', manual: 'Sans plage fixe' };
   const MODE_SHORT = { h24: '24 h/24', hc: 'Heures creuses', hp: 'Heures pleines', range: 'Plages', manual: 'Sans plage fixe' };
-  /* Règle à partir d'une date : on garde l'ancienne règle pour le passé, la règle actuelle (modifiable ci-dessus) vaut pour la suite. */
+  /* Changer la règle d'un équipement pour une période : à partir de maintenant (défaut), tout l'historique, ou du jour A au jour B.
+     eq.periods = [{from, to, mode, days, ranges}] ('AAAA-MM-JJ HH:MM', fin exclue, vide = sans limite) ; la dernière période créée l'emporte. */
   function ruleText(r) {
     const mode = MODES[r.mode] || r.mode;
     const rs = r.mode === 'range' ? C.eqRanges(r).map((x) => x.from + '–' + x.to).join(', ') : '';
     return mode + (rs ? ' : ' + rs : '');
   }
-  function pastBlock(e) {
-    const past = e.past || [];
-    const dt = (u) => dmyFull(u.slice(0, 10)) + ' à ' + u.slice(11);
-    const open = ui.rv === e.id;
-    return `<div style="grid-column:1/-1;margin-top:4px">
-      ${past.length ? `<div class="small muted" style="margin-bottom:4px">Règles précédentes de cet équipement :</div>${past.map((p, i) => `<div class="eqrow"><span class="grow small">Avant le ${dt(p.until)} : ${esc(ruleText(p))}</span><button class="iconbtn" style="width:34px;height:34px;font-size:15px;flex:none" data-act="rvdel" data-id="${e.id}" data-i="${i}" aria-label="Supprimer cette règle précédente">×</button></div>`).join('')}<div class="small muted" style="margin:4px 0">La règle affichée ci-dessus s'applique à partir du ${past.length ? dt(past[past.length - 1].until) : 'début'}.</div>` : ''}
-      ${open ? `<div class="warn"><div class="small">À partir de quand la nouvelle règle doit-elle s'appliquer ? L'ancienne règle est gardée pour tout ce qui précède. Après avoir validé, modifie la règle ci-dessus.</div>
-        <div class="grid2" style="margin-top:8px"><label class="f">Date<input type="date" id="rvd-${e.id}" value="${todayIso()}"></label><label class="f">Heure${tsel(`id="rvt-${e.id}"`, '00:00', 30)}</label></div>
-        ${ui.rvmsg ? `<div class="msg" style="margin-top:8px">${esc(ui.rvmsg)}</div>` : ''}
-        <div class="row" style="margin-top:8px;gap:8px"><button class="btn" data-act="rvok" data-id="${e.id}">Valider la date</button><button class="btn ghost" data-act="rvopen" data-id="${e.id}">Annuler</button></div></div>`
-      : `<button class="btn ghost" data-act="rvopen" data-id="${e.id}">Changer la règle à partir d'une date…</button>`}
+  const nowKey = () => { const t = new Date(), m = t.getHours() * 60 + (t.getMinutes() >= 30 ? 30 : 0); return todayIso() + ' ' + C.fromMin(m); };
+  function rvInit(e) {
+    const now = nowKey(), r = C.ruleAt(e, now.slice(0, 10), C.hm(now.slice(11)));
+    return { id: e.id, scope: 'now', from: todayIso(), to: '', warn: false, msg: '',
+      mode: r.mode || 'range', days: (r.days && r.days.length ? r.days : e.days && e.days.length ? e.days : [0, 1, 2, 3, 4, 5, 6]).slice(),
+      ranges: JSON.parse(JSON.stringify(C.eqRanges(r))).map((x) => ({ from: x.from, to: x.to, days: x.days ? x.days.slice() : null })) };
+  }
+  function rvForm(e) {
+    const f = ui.rvf, today = todayIso();
+    const rd = (r) => (r.days && r.days.length ? r.days : f.days);
+    return `<div class="warn" style="margin-top:6px">
+      <div class="small"><b>Pour quelle période la règle change-t-elle ?</b></div>
+      <div style="margin-top:6px">${[['now', 'À partir de maintenant (le passé ne change pas)'], ['all', 'Tout l\'historique (passé compris)'], ['range', 'Une période choisie (du jour … au jour …)']].map(([v, l]) => `<label class="row" style="gap:8px;margin-top:4px"><input type="radio" name="rvs-${e.id}" ${f.scope === v ? 'checked' : ''} data-ch="rvf-scope" data-v="${v}"><span class="small">${l}</span></label>`).join('')}</div>
+      ${f.scope === 'range' ? `<div class="grid2" style="margin-top:8px"><label class="f">Du<input type="date" value="${f.from}" data-ch="rvf-from"></label><label class="f">Au (inclus, facultatif)<input type="date" value="${f.to}" data-ch="rvf-to"></label></div>` : ''}
+      <div class="small" style="margin-top:12px"><b>Nouvelle règle</b></div>
+      <label class="f" style="margin-top:4px">Fonctionnement<select data-ch="rvf-mode">${Object.entries(MODES).map(([k, v]) => `<option value="${k}"${f.mode === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+      ${f.mode === 'range' ? `<div class="ranges" style="margin-top:6px">${f.ranges.map((r, i) => `<div class="rgblock"><div class="rg"><span class="tag">Plage ${i + 1}</span>${tsel(`data-ch="rvf-rf" data-i="${i}" aria-label="Début plage ${i + 1}"`, r.from, 15)}${tsel(`data-ch="rvf-rt" data-i="${i}" aria-label="Fin plage ${i + 1}"`, r.to, 15, false, true)}<button class="iconbtn" style="width:34px;height:34px;font-size:15px;flex:none" data-act="rvf-delrange" data-i="${i}" aria-label="Supprimer la plage ${i + 1}">×</button></div>
+        <div class="row" style="gap:6px;margin-top:6px">${DAYS_ORDER.map(([d, l]) => `<label class="dchip"><input type="checkbox" ${rd(r).includes(d) ? 'checked' : ''} data-ch="rvf-rd" data-i="${i}" data-d="${d}"><span>${l}</span></label>`).join('')}</div></div>`).join('')}<div><button class="btn ghost" data-act="rvf-addrange">+ Ajouter une plage</button></div></div>` : ''}
+      ${f.msg ? `<div class="msg" style="margin-top:8px">${esc(f.msg)}</div>` : ''}
+      ${f.warn ? `<div class="warn" style="margin-top:10px"><div class="small"><b>Tu vas modifier des jours passés.</b> ${f.scope === 'all' ? 'La nouvelle règle remplacera l\'ancienne sur tout l\'historique, et les périodes déjà enregistrées pour cet équipement seront supprimées.' : 'La nouvelle règle s\'appliquera du ' + dmyFull(f.from) + (f.to ? ' au ' + dmyFull(f.to) : ' à aujourd\'hui et après') + '.'} Tes croix forcées à la main ne changent pas ; les autres croix de ces jours seront recalculées avec la nouvelle règle. Tes données importées ne changent pas. Confirmer ?</div><div class="row" style="margin-top:8px;gap:8px"><button class="btn" data-act="rvf-yes">Oui, modifier</button><button class="btn ghost" data-act="rvf-no">Non</button></div></div>` : `<div class="row" style="margin-top:12px;gap:8px"><button class="btn" data-act="rvf-ok">Valider</button><button class="btn ghost" data-act="rvopen" data-id="${e.id}">Annuler</button></div>`}
     </div>`;
+  }
+  function pastBlock(e) {
+    const past = e.past || [], per = e.periods || [];
+    const dt = (u) => dmyFull(u.slice(0, 10)) + ' à ' + u.slice(11);
+    const toTxt = (u) => (u.endsWith(' 00:00') ? dmyFull(C.addDays(u.slice(0, 10), -1)) + ' inclus' : dt(u));
+    const open = ui.rv === e.id && ui.rvf && ui.rvf.id === e.id;
+    const list = per.map((p, i) => `<div class="eqrow"><span class="grow small">${p.from && p.to ? 'Du ' + dt(p.from) + ' au ' + toTxt(p.to) : p.from ? 'À partir du ' + dt(p.from) : p.to ? 'Jusqu\'au ' + toTxt(p.to) : 'Toujours'} : ${esc(ruleText(p))}</span><button class="iconbtn" style="width:34px;height:34px;font-size:15px;flex:none" data-act="rvpdel" data-id="${e.id}" data-i="${i}" aria-label="Supprimer cette période">×</button></div>`)
+      .concat(past.map((p, i) => `<div class="eqrow"><span class="grow small">Avant le ${dt(p.until)} : ${esc(ruleText(p))}</span><button class="iconbtn" style="width:34px;height:34px;font-size:15px;flex:none" data-act="rvdel" data-id="${e.id}" data-i="${i}" aria-label="Supprimer cette règle précédente">×</button></div>`));
+    return `<div style="grid-column:1/-1;margin-top:4px">
+      ${list.length ? `<div class="small muted" style="margin-bottom:4px">Règles par période (la dernière créée l'emporte) :</div>${list.join('')}<div class="small muted" style="margin:4px 0">Ailleurs, c'est la règle affichée ci-dessus qui s'applique.</div>` : ''}
+      ${open ? rvForm(e) : `<button class="btn ghost" data-act="rvopen" data-id="${e.id}">Changer la règle…</button>`}
+    </div>`;
+  }
+  function rvApply() {
+    const f = ui.rvf, e = f && S.equip.find((x) => x.id === f.id);
+    if (!e) return;
+    const rule = { mode: f.mode, days: f.days.slice(), ranges: f.mode === 'range' ? f.ranges.filter((r) => r.from && r.to).map((r) => ({ from: r.from, to: r.to, days: r.days && r.days.length ? r.days.slice() : f.days.slice() })) : [] };
+    if (f.scope === 'all') {
+      e.mode = rule.mode; e.days = rule.days; e.ranges = rule.ranges; delete e.from; delete e.to; delete e.periods; delete e.past;
+    } else {
+      const from = f.scope === 'now' ? nowKey() : f.from + ' 00:00';
+      const to = f.scope === 'range' && f.to ? C.addDays(f.to, 1) + ' 00:00' : '';
+      e.periods = (e.periods || []).concat([Object.assign({ from, to }, rule)]);
+    }
+    ui.rv = null; ui.rvf = null; save(); render();
   }
   function rangesOf(e) {
     if (!e.ranges) { e.ranges = C.eqRanges(e).map((r) => ({ from: r.from, to: r.to })); delete e.from; delete e.to; }
@@ -2059,19 +2096,25 @@ nav.tabs button{position:relative}
       }
     }
     else if (a === 'eqlock') { C.setLock(S, el.dataset.eq, el.dataset.key, false); save(); render(); }
-    else if (a === 'rvopen') { ui.rv = ui.rv === el.dataset.id ? null : el.dataset.id; ui.rvmsg = ''; render(); }
+    else if (a === 'rvopen') { const e = S.equip.find((x) => x.id === el.dataset.id); if (ui.rv === el.dataset.id || !e) { ui.rv = null; ui.rvf = null; } else { ui.rv = el.dataset.id; ui.rvf = rvInit(e); } render(); }
     else if (a === 'rvdel') { const e = S.equip.find((x) => x.id === el.dataset.id); if (e && e.past) { e.past.splice(Number(el.dataset.i), 1); if (!e.past.length) delete e.past; save(); render(); } }
-    else if (a === 'rvok') {
-      const e = S.equip.find((x) => x.id === el.dataset.id);
-      const d = document.getElementById('rvd-' + el.dataset.id), t = document.getElementById('rvt-' + el.dataset.id);
-      if (e && d && d.value && t && t.value) {
-        const until = d.value + ' ' + t.value, last = e.past && e.past.length ? e.past[e.past.length - 1].until : '';
-        if (last && until <= last) { ui.rvmsg = 'Choisis une date après le ' + dmyFull(last.slice(0, 10)) + ' à ' + last.slice(11) + ' (la dernière date déjà enregistrée).'; render(); return; }
-        const snap = { until, mode: e.mode, days: e.days ? e.days.slice() : [], ranges: JSON.parse(JSON.stringify(C.eqRanges(e))) };
-        e.past = (e.past || []).concat([snap]);
-        ui.rv = null; ui.rvmsg = ''; save(); render();
+    else if (a === 'rvpdel') { const e = S.equip.find((x) => x.id === el.dataset.id); if (e && e.periods) { e.periods.splice(Number(el.dataset.i), 1); if (!e.periods.length) delete e.periods; save(); render(); } }
+    else if (a === 'rvf-addrange' && ui.rvf) { const rs = ui.rvf.ranges, last = rs[rs.length - 1]; rs.push({ from: '12:00', to: '14:00', days: last && last.days ? last.days.slice() : null }); render(); }
+    else if (a === 'rvf-delrange' && ui.rvf) { ui.rvf.ranges.splice(Number(el.dataset.i), 1); render(); }
+    else if (a === 'rvf-no' && ui.rvf) { ui.rvf.warn = false; render(); }
+    else if (a === 'rvf-ok' && ui.rvf) {
+      const f = ui.rvf, today = todayIso();
+      f.msg = '';
+      if (f.mode === 'range' && !f.ranges.length) { f.msg = 'Ajoute au moins une plage.'; render(); return; }
+      if (f.scope === 'range') {
+        if (!f.from) { f.msg = 'Choisis le jour de début.'; render(); return; }
+        if (f.to && f.to < f.from) { f.msg = 'Le jour de fin doit être le même jour que le début ou après.'; render(); return; }
       }
+      const past = f.scope === 'all' || (f.scope === 'range' && f.from < today);
+      if (past) { f.warn = true; render(); return; }
+      rvApply();
     }
+    else if (a === 'rvf-yes' && ui.rvf) rvApply();
     else if (a === 'addrange') { const e = S.equip.find((x) => x.id === el.dataset.id); if (e) { { const rs = rangesOf(e), last = rs[rs.length - 1]; rs.push({ from: '12:00', to: '14:00', days: last && last.days ? last.days.slice() : e.days && e.days.length ? e.days.slice() : [0, 1, 2, 3, 4, 5, 6] }); } save(); render(); } }
     else if (a === 'delrange') { const e = S.equip.find((x) => x.id === el.dataset.id); if (e) { const r = rangesOf(e); r.splice(Number(el.dataset.i), 1); if (!r.length) r.push({ from: '18:00', to: '22:00' }); save(); render(); } }
     else if (a === 'pastecsv') {
@@ -2130,6 +2173,21 @@ nav.tabs button{position:relative}
     const el = e.target, k = el.dataset && el.dataset.ch;
     if (!k) return;
     if (k === 'files') { if (el.files && el.files.length) importFiles([...el.files]); return; }
+    if (k && k.startsWith('rvf-') && ui.rvf) {
+      const f = ui.rvf, i = Number(el.dataset.i);
+      if (k === 'rvf-scope') { f.scope = el.dataset.v; f.warn = false; }
+      else if (k === 'rvf-from') f.from = el.value;
+      else if (k === 'rvf-to') f.to = el.value;
+      else if (k === 'rvf-mode') { f.mode = el.value; if (f.mode === 'range' && !f.ranges.length) f.ranges.push({ from: '18:00', to: '22:00', days: null }); }
+      else if (k === 'rvf-rf' && f.ranges[i] && el.value) f.ranges[i].from = el.value;
+      else if (k === 'rvf-rt' && f.ranges[i] && el.value) f.ranges[i].to = el.value;
+      else if (k === 'rvf-rd' && f.ranges[i]) {
+        const cur = (f.ranges[i].days && f.ranges[i].days.length ? f.ranges[i].days : f.days).slice(), d = Number(el.dataset.d), at = cur.indexOf(d);
+        if (el.checked && at < 0) cur.push(d); else if (!el.checked && at >= 0) cur.splice(at, 1);
+        f.ranges[i].days = cur;
+      }
+      render(); return;
+    }
     if (k === 'pfrom') { ui.from = el.value; render(); return; }
     if (k === 'pto') { ui.to = el.value; render(); return; }
     if (k === 'dayin') { if (el.value) { ui.day = el.value; ui.sel = null; render(); } return; }

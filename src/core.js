@@ -417,9 +417,11 @@
   /* Règles précédentes d'un équipement (eq.past = [{until:'AAAA-MM-JJ HH:MM', mode, ranges, days}], dans l'ordre) :
      avant « until », c'est cette ancienne règle qui s'applique ; après la dernière, la règle actuelle de l'équipement. */
   function ruleAt(eq, date, min) {
-    if (eq.past && eq.past.length) {
+    if ((eq.periods && eq.periods.length) || (eq.past && eq.past.length)) {
       const k = date + ' ' + fromMin(min);
-      for (const p of eq.past) if (k < p.until) return p;
+      /* périodes choisies (la dernière créée l'emporte), puis anciennes règles « avant le… » */
+      if (eq.periods) for (let i = eq.periods.length - 1; i >= 0; i--) { const p = eq.periods[i]; if ((!p.from || k >= p.from) && (!p.to || k < p.to)) return p; }
+      if (eq.past) for (const p of eq.past) if (k < p.until) return p;
     }
     return eq;
   }
