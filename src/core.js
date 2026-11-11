@@ -430,6 +430,10 @@
     const t = new Date(), z = (n) => String(n).padStart(2, '0');
     return ruleAt(e, t.getFullYear() + '-' + z(t.getMonth() + 1) + '-' + z(t.getDate()), t.getHours() * 60 + t.getMinutes()).mode || e.mode;
   }
+  /* Équipement dont des créneaux viennent d'une règle (et non seulement de croix cochées à la main) : règle en vigueur ou une de ses périodes. */
+  function hasRule(e) {
+    return curMode(e) !== 'manual' || (e.periods || []).some((p) => p.mode !== 'manual' && p.mode !== 'off');
+  }
   function eqRuleOn(eq0, date, min, share) {
     const eq = ruleAt(eq0, date, min);
     if (eq.mode === 'h24') return true;
@@ -548,7 +552,7 @@
     eqs.forEach((e, j) => {
       let w = p[j + 1], nAct = null;
       /* Seuls comptent les créneaux où l'appareil tourne vraiment : au-dessus du fond d'au moins la moitié de sa puissance. */
-      if (curMode(e) !== 'manual') {
+      if (hasRule(e)) {
         const thr = e.wmax > 0 ? 0.5 * e.wmax : Math.max(40, 0.5 * p[j + 1]);
         const act = [];
         for (let i = 0; i < n; i++) {

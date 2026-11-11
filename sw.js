@@ -1,5 +1,5 @@
 /* Service worker : l'appli fonctionne hors connexion une fois ouverte une fois. */
-const CACHE = 'conso-1794395510';
+const CACHE = 'conso-1794395830';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
