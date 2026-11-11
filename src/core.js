@@ -425,6 +425,11 @@
     }
     return eq;
   }
+  /* Fonctionnement en vigueur maintenant (règle de la période en cours, sinon règle de base) : sert aux calculs de puissance. */
+  function curMode(e) {
+    const t = new Date(), z = (n) => String(n).padStart(2, '0');
+    return ruleAt(e, t.getFullYear() + '-' + z(t.getMonth() + 1) + '-' + z(t.getDate()), t.getHours() * 60 + t.getMinutes()).mode || e.mode;
+  }
   function eqRuleOn(eq0, date, min, share) {
     const eq = ruleAt(eq0, date, min);
     if (eq.mode === 'h24') return true;
@@ -508,7 +513,7 @@
   /* Moindres carrés sous contrainte de positivité (descente par coordonnées) :
      puissance de fond (équipements en continu inclus) + une puissance par équipement non continu. */
   function estimate(state, byDate) {
-    const eqs = (state.equip || []).filter((e) => e.mode !== 'h24' && !e.rest);
+    const eqs = (state.equip || []).filter((e) => curMode(e) !== 'h24' && !e.rest);
     const rows = slotRows(state, byDate);
     const n = rows.length;
     if (n < 48) return null;
@@ -543,7 +548,7 @@
     eqs.forEach((e, j) => {
       let w = p[j + 1], nAct = null;
       /* Seuls comptent les créneaux où l'appareil tourne vraiment : au-dessus du fond d'au moins la moitié de sa puissance. */
-      if (e.mode !== 'manual') {
+      if (curMode(e) !== 'manual') {
         const thr = e.wmax > 0 ? 0.5 * e.wmax : Math.max(40, 0.5 * p[j + 1]);
         const act = [];
         for (let i = 0; i < n; i++) {
@@ -571,7 +576,7 @@
   function powers(state, est) {
     const res = {}, eqs = state.equip || [];
     let declH24 = 0, freeH24 = 0;
-    for (const e of eqs.filter((q) => q.mode === 'h24')) {
+    for (const e of eqs.filter((q) => curMode(q) === 'h24')) {
       const mw = measuredW(state, e.id), w = mw != null ? mw : e.watts > 0 ? e.watts : null;
       if (w != null) declH24 += w; else freeH24++;
     }
@@ -580,7 +585,7 @@
       const mw = measuredW(state, e.id);
       if (mw != null) { res[e.id] = { w: mw, src: 'mesure' }; continue; }
       if (e.watts > 0) { res[e.id] = { w: e.watts, src: 'saisie' }; continue; }
-      if (e.mode === 'h24') {
+      if (curMode(e) === 'h24') {
         res[e.id] = est && freeH24 ? { w: Math.max(0, est.floor - declH24) / freeH24, src: 'estimée', shared: freeH24 > 1 } : { w: 0, src: 'aucune' };
         continue;
       }
@@ -590,7 +595,7 @@
       else res[e.id] = x ? { w: 0, src: 'estimée', nOn: x.nOn, nOff: x.nOff, twins: x.twins } : { w: 0, src: 'aucune' };
     }
     let h24 = 0;
-    for (const e of eqs) if (e.mode === 'h24') h24 += res[e.id].w || 0;
+    for (const e of eqs) if (curMode(e) === 'h24') h24 += res[e.id].w || 0;
     Object.defineProperty(res, '_base', { value: est ? Math.max(0, est.floor - h24) : 0, enumerable: false });
     Object.defineProperty(res, '_floor', { value: est ? est.floor : 0, enumerable: false });
     return res;
@@ -609,7 +614,7 @@
     }
     return null;
   }
-  const isPrio = (e) => e.prio === true || (e.mode === 'h24' && e.prio !== false);
+  const isPrio = (e) => e.prio === true || (curMode(e) === 'h24' && e.prio !== false);
 
   function splitSlot(state, row, pw) {
     const items = [], fixed = [], gated = [], idle = [], rest = [];
@@ -623,11 +628,11 @@
       if (e.rest) { rest.push(e.id); continue; }
       if (isPrio(e)) {
         /* prioritaire : sa valeur est prise en premier, sauf si la mesure du créneau la contredit (appareil prévu par la règle) */
-        if (w > 0 && e.mode !== 'h24' && !forced && left - base < 0.5 * w) { idle.push(e.id); continue; }
+        if (w > 0 && curMode(e) !== 'h24' && !forced && left - base < 0.5 * w) { idle.push(e.id); continue; }
         if (w > 0) { const c = Math.min(w, left); items.push({ id: e.id, w: c }); left -= c; }
         continue;
       }
-      if (e.mode === 'h24' || forced) { if (w > 0) fixed.push({ id: e.id, w }); continue; }
+      if (curMode(e) === 'h24' || forced) { if (w > 0) fixed.push({ id: e.id, w }); continue; }
       if (w > 0) gated.push({ id: e.id, w });
       else if (floor > 0 && row.w - floor < 40) idle.push(e.id);
     }
@@ -779,10 +784,10 @@
     let best = null, bd = Infinity;
     const sp = splitSlot(state, row, pw);
     for (const e of state.equip || []) {
-      if (e.mode === 'h24' || e.rest || eqOn(state, e, row.key, row.share) || eqSet(state, e, row.key) !== null) continue;
+      if (curMode(e) === 'h24' || e.rest || eqOn(state, e, row.key, row.share) || eqSet(state, e, row.key) !== null) continue;
       if (ruleAt(e, row.key.slice(0, 10), hm(row.key.slice(11, 16))).mode === 'off') continue; /* période « éteint » : aucune proposition */
       if (lo && lo[e.id]) return e.id;
-      if (e.mode !== 'manual') continue; /* une plage est une tendance : pas de suggestion hors plage, sauf exception indiquée par l'utilisateur */
+      if (curMode(e) !== 'manual') continue; /* une plage est une tendance : pas de suggestion hors plage, sauf exception indiquée par l'utilisateur */
       const w = (pw[e.id] || {}).w || 0;
       if (w < 300) continue;
       if (sp.avail >= 0.6 * w && sp.avail <= 1.6 * w && Math.abs(sp.avail - w) < bd) { best = e.id; bd = Math.abs(sp.avail - w); }
@@ -815,7 +820,7 @@
     addDays, dow, frToIso, hm, fromMin, decode, parseCsv, parseIndex, parsePower, parsePmax, parsePmax, parseZip,
     defaultState, mergeImport, buildByDate, scheduleFor, hcMinutes, hcShare,
     dayStats, calibrate, rangesOf, allDates, periodStats, costFor, cmpKey,
-    avgPowers, eqLocked, setLock, parseVe, importVe, applyVeRules, veWindow, crossCheck, spanOf, spanKeys, eqRuleOn, eqRanges, ruleAt, eqSet, looseSlots, suggestFor, eqOn, setEqOn, slotRows, hoursBetween, measuredW, estimate, powers, splitSlot, slotPrice, attribute,
+    avgPowers, eqLocked, setLock, parseVe, importVe, applyVeRules, veWindow, crossCheck, spanOf, spanKeys, eqRuleOn, eqRanges, ruleAt, curMode, eqSet, looseSlots, suggestFor, eqOn, setEqOn, slotRows, hoursBetween, measuredW, estimate, powers, splitSlot, slotPrice, attribute,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Core = api;

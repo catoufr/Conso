@@ -28,7 +28,7 @@
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '40', APP_DATE = '10 novembre 2026';
+  const APP_VERSION = '41', APP_DATE = '10 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -378,11 +378,11 @@
       const vw = on ? C.veWindow(S, e.id, row.key) : null, fl = m.pw._floor || 0;
       const locked = C.eqLocked(S, e.id, row.key), exact = !!(vw && vw.from && vw.to);
       /* Valeurs sûres : fond en continu, relevé du chargeur, plage sûre (ex. chauffe-eau), forçage manuel. Le reste d'une plage = tendance (pointillé). */
-      const sureOn = on && (e.mode === 'h24' || forced || locked || exact || e.sure);
+      const sureOn = on && (C.ruleAt(e, row.date, row.min).mode === 'h24' || forced || locked || exact || e.sure);
       const auto = on && !forced && sp.idle.includes(e.id);
       const trend = on && !sureOn && !auto;
       const st = auto ? 'auto' : on ? (sureOn ? 'on' : 'sug') : sug === e.id ? 'sug' : 'off';
-      let how = forced ? 'confirmé' : st === 'on' ? (e.mode === 'h24' ? 'continu' : exact ? '' : e.sure ? 'plage sûre' : 'plage définie') : trend ? 'tendance de la plage · touche pour confirmer' : st === 'sug' ? 'estimé · touche pour confirmer' : '';
+      let how = forced ? 'confirmé' : st === 'on' ? (C.ruleAt(e, row.date, row.min).mode === 'h24' ? 'continu' : exact ? '' : e.sure ? 'plage sûre' : 'plage définie') : trend ? 'tendance de la plage · touche pour confirmer' : st === 'sug' ? 'estimé · touche pour confirmer' : '';
       const w = on && st !== 'auto' && byId[e.id] ? Math.round(byId[e.id]) + ' W' : st === 'sug' && m.pw[e.id] ? '≈ ' + Math.round(m.pw[e.id].w) + ' W' : '—';
       if (vw) {
         const r = (byId[e.id] || 0) + sp.avail, ref = m.pw[e.id].w || 3700;
@@ -679,13 +679,13 @@
       const kk = m.at && m.at.eq[e.id] ? m.at.eq[e.id].kwh : null;
       info = 'Puissance variable : à chaque créneau où il est prévu, l\'appli lui attribue ce qui reste une fois déduits le fond (veilles) et les autres équipements. Une plage plus longue ne change donc pas sa valeur.'
         + (kk != null ? ` Sur la période affichée : ${f1(kk)} kWh attribués.` : '')
-        + (e.mode === 'manual' ? ' Attention : sans plage, rien ne lui est attribué. Choisis « Plage(s) répétitive(s) » ou coche ses créneaux dans l\'onglet Jour.' : (C.eqRanges(e).length || e.mode !== 'range' ? '' : ' Aucune plage définie.'));
+        + (C.curMode(e) === 'manual' ? ' Attention : sans plage, rien ne lui est attribué. Choisis « Plage(s) répétitive(s) » ou coche ses créneaux dans l\'onglet Jour.' : (C.eqRanges(e).length || e.mode !== 'range' ? '' : ' Aucune plage définie.'));
     }
     else if (pw.src === 'mesure') info = `Puissance retenue : ${Math.round(pw.w)} W, d'après tes mesures réelles.`;
     else if (pw.src === 'saisie') info = `Puissance retenue : ${Math.round(pw.w)} W, celle que tu as saisie.`;
     else if (pw.src === 'estimée') {
       info = `Puissance estimée : ${Math.round(pw.w)} W`;
-      if (e.mode === 'h24') info += ` (part du fond permanent${pw.shared ? ', partagé entre tes équipements en continu' : ''}).`;
+      if (C.curMode(e) === 'h24') info += ` (part du fond permanent${pw.shared ? ', partagé entre tes équipements en continu' : ''}).`;
       else {
         info += ` d'après ${pw.nOn} créneaux en route et ${pw.nOff} à l'arrêt${pw.nOn < 10 || pw.nOff < 10 ? ' : estimation peu fiable' : ''}.`;
         if (pw.twins && pw.twins.length) info += ` Même fonctionnement que ${pw.twins.map(eqName).join(', ')} : impossible de les séparer, précise des créneaux ou une mesure.`;
@@ -693,8 +693,8 @@
     } else if (pw.src === 'max') info = `Puissance retenue : ${Math.round(pw.w)} W (ta puissance max, en attendant une meilleure estimation).`;
     else info = 'Pas de puissance pour l\'instant : saisis-la, indique une puissance max ou précise des créneaux.';
     if (pw.src === 'estimée' && pw.nAct) info += ` Détecté réellement actif sur ${pw.nAct} créneaux.`;
-    info += e.rest ? '' : e.mode === 'manual' ? ' Sans plage fixe : indique les créneaux dans l\'onglet Jour ; l\'appli propose en pointillé ceux qui semblent cohérents (puissance saisie ou max requise).'
-      : e.mode === 'h24' ? '' : e.wmax > 0 ? ' Avec une puissance max, la plage dit seulement où il peut tourner : l\'appli ne lui attribue que les créneaux où la mesure le justifie.' : ' Ajoute une puissance max pour que la plage ne soit pas comptée en entier.';
+    info += e.rest ? '' : C.curMode(e) === 'manual' ? ' Sans plage fixe : indique les créneaux dans l\'onglet Jour ; l\'appli propose en pointillé ceux qui semblent cohérents (puissance saisie ou max requise).'
+      : C.curMode(e) === 'h24' ? '' : e.wmax > 0 ? ' Avec une puissance max, la plage dit seulement où il peut tourner : l\'appli ne lui attribue que les créneaux où la mesure le justifie.' : ' Ajoute une puissance max pour que la plage ne soit pas comptée en entier.';
     const meas = (S.eqMeas || []).filter((x) => x.eq === e.id);
     const lastDay = m.dates.length ? m.dates[m.dates.length - 1] : '';
     return `<details class="card fold" data-k="eq-${e.id}" data-eid="${e.id}"${op('eq-' + e.id, false)}>
