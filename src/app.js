@@ -28,7 +28,7 @@
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '39', APP_DATE = '10 novembre 2026';
+  const APP_VERSION = '40', APP_DATE = '10 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -185,17 +185,18 @@
   /* barres de puissance par créneau ; pts : [{min, w, forced}], date sert à la part HC (couleur de la barre) */
   function powerBars(pts, date, selIdx, label, inert) {
     const W = 360, H = 190, L = 30, R = 6, T = 10, B = 24, iw = W - L - R, ih = H - T - B;
-    const ax = axis(Math.max(500, ...pts.map((p) => p.w)) / 1000);
+    const kw = (w) => (w * 0.5) / 1000; /* kWh sur la demi-heure, comme EDF et Hello Watt */
+    const ax = axis(Math.max(0.25, ...pts.map((p) => kw(p.w))));
     const y = (v) => T + ih - (v / ax.top) * ih;
     const n = pts.length, slot = iw / n, bw = Math.max(1.5, slot * 0.78);
     let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">`;
     for (const t of ax.ticks) s += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text x="${L - 4}" y="${y(t) + 3}" text-anchor="end">${tickFmt(t)}</text>`;
-    s += `<text x="${L}" y="${T - 1}" text-anchor="start" style="font-size:8.5px">kW</text>`;
+    s += `<text x="${L}" y="${T - 1}" text-anchor="start" style="font-size:8.5px">kWh</text>`;
     pts.forEach((p, i) => {
       const f = p.hs !== undefined ? p.hs : C.hcShare(date, p.min, S.schedules, S.shift);
-      const h = Math.max(0, y(0) - y(p.w / 1000)), x = L + slot * i + (slot - bw) / 2;
+      const h = Math.max(0, y(0) - y(kw(p.w))), x = L + slot * i + (slot - bw) / 2;
       const stroke = i === selIdx ? ' stroke="var(--ink)" stroke-width="2"' : p.forced ? ' stroke="var(--ink)" stroke-width="1.2" stroke-dasharray="2 1.5"' : '';
-      s += `<rect x="${x}" y="${y(p.w / 1000)}" width="${bw}" height="${h}" fill="${f >= 0.5 ? 'var(--hc)' : 'var(--hp)'}"${stroke}/>`;
+      s += `<rect x="${x}" y="${y(kw(p.w))}" width="${bw}" height="${h}" fill="${f >= 0.5 ? 'var(--hc)' : 'var(--hp)'}"${stroke}/>`;
       if (!inert || inert === 'unx') s += `<rect class="hit" data-act="${inert === 'unx' ? 'unxgo' : 'slot'}" data-i="${i}" x="${L + slot * i}" y="${T}" width="${slot}" height="${ih}"/>`;
     });
     for (let hr = 0; hr <= 24; hr += 4) {
@@ -338,7 +339,7 @@
       <p class="note">${eur(cr.total)} avec ${esc(m.ref.name)}, abonnement inclus.${st.forced ? ` ${st.forced} créneau${st.forced > 1 ? 'x' : ''} corrigé${st.forced > 1 ? 's' : ''} à la main.` : ''}</p></div>`;
     if (st.src === '30min') {
       const sel = ui.sel != null && sl[ui.sel] ? ui.sel : null;
-      h += `<div class="card"><h2>Puissance par demi-heure</h2>${powerBars(sl, d, sel, 'Puissance moyenne par demi-heure ce jour')}
+      h += `<div class="card"><h2>Consommation par demi-heure (kWh)</h2>${powerBars(sl, d, sel, 'Puissance moyenne par demi-heure ce jour')}
         <div class="legend">${LEG_HPHC}<span>Contour pointillé : valeur corrigée</span></div>`;
       if (sel != null) {
         const s = sl[sel], k = (s.w * 0.5) / 1000, f = s.hs !== undefined ? s.hs : C.hcShare(d, s.min, S.schedules, S.shift);
