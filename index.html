@@ -1025,7 +1025,7 @@ nav.tabs button{position:relative}
   const parseNum = (v) => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : null; };
 
   /* Plusieurs sites (maisons, compteurs) : chacun garde sa propre base. Le premier garde l'ancienne clé. */
-  const APP_VERSION = '42', APP_DATE = '10 novembre 2026';
+  const APP_VERSION = '43', APP_DATE = '10 novembre 2026';
   const SKEY = 'conso-sites-v1';
   let sites = { cur: 's1', list: [{ id: 's1', name: 'Maison' }] };
   const siteKey = (id) => (id === 's1' ? KEY : 'conso-site-' + id);
@@ -1052,6 +1052,7 @@ nav.tabs button{position:relative}
   }
   function save() { try { localStorage.setItem(siteKey(sites.cur), JSON.stringify(S)); storageOk = true; } catch (e) { storageOk = false; } }
 
+  let gmax = null; /* maxima de toutes les données, pour l'échelle fixe des graphes (option dans Données) */
   function model() {
     const by = C.buildByDate(S);
     const dates = C.allDates(S, by);
@@ -1067,6 +1068,13 @@ nav.tabs button{position:relative}
       if (p.from < first) p.from = first;
     }
     const list = p && p.from <= p.to ? C.periodStats(S, by, p.from, p.to) : [];
+    gmax = null;
+    if (prefs().fixedScale && dates.length) {
+      let sl = 0;
+      for (const d of Object.keys(by)) for (const x of by[d]) if (x.w > sl) sl = x.w;
+      const fr = dates[0], to = dates[dates.length - 1];
+      gmax = { all: C.periodStats(S, by, fr, to), slot: (sl * 0.5) / 1000, prof: (Math.max(0, ...profile(by, { from: fr, to }).map((x) => x.w)) * 0.5) / 1000 };
+    }
     const est = S.equip.length ? C.estimate(S, by) : null;
     const pw = C.powers(S, est);
     const loose = S.equip.length ? C.looseSlots(S, by, pw) : {};
@@ -1134,7 +1142,7 @@ nav.tabs button{position:relative}
     const bs = buckets(list, gran || 'day');
     const two = gran === 'week' || gran === 'month';
     const W = 360, H = two ? 214 : 200, L = 30, R = 6, T = 14, B = two ? 38 : 24, iw = W - L - R, ih = H - T - B;
-    const ax = axis(Math.max(1, ...bs.map((d) => d.kwh)));
+    const ax = axis(Math.max(1, gmax ? Math.max(0, ...buckets(gmax.all, gran || 'day').map((d) => d.kwh)) : 0, ...bs.map((d) => d.kwh)));
     const y = (v) => T + ih - (v / ax.top) * ih;
     const n = bs.length, slot = iw / n, bw = Math.min(gran === 'day' || !gran ? 26 : 44, slot * 0.72);
     const what = { day: 'jour', week: 'semaine', month: 'mois', year: 'année' }[gran || 'day'];
@@ -1180,10 +1188,10 @@ nav.tabs button{position:relative}
   const LEG_HPHC = '<span><i class="dot hp"></i>Heures pleines</span><span><i class="dot hc"></i>Heures creuses</span>';
 
   /* barres de puissance par créneau ; pts : [{min, w, forced}], date sert à la part HC (couleur de la barre) */
-  function powerBars(pts, date, selIdx, label, inert) {
+  function powerBars(pts, date, selIdx, label, inert, ext) {
     const W = 360, H = 190, L = 30, R = 6, T = 10, B = 24, iw = W - L - R, ih = H - T - B;
     const kw = (w) => (w * 0.5) / 1000; /* kWh sur la demi-heure, comme EDF et Hello Watt */
-    const ax = axis(Math.max(0.25, ...pts.map((p) => kw(p.w))));
+    const ax = axis(Math.max(0.25, ext || 0, ...pts.map((p) => kw(p.w))));
     const y = (v) => T + ih - (v / ax.top) * ih;
     const n = pts.length, slot = iw / n, bw = Math.max(1.5, slot * 0.78);
     let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">`;
@@ -1258,7 +1266,7 @@ nav.tabs button{position:relative}
     h += bucketCard(list, ref);
     h += `<div class="card"><h2>Comparaison des contrats</h2><div class="list">${contractRows(list, ref)}</div><p class="note">${S.contracts.length < 2 ? 'Ajoute un ou deux contrats dans l\'onglet Contrats pour voir l\'écart de coût sur la même consommation.' : 'Même consommation, mêmes heures creuses, prix de chaque contrat. Abonnement ramené au nombre de jours.'}</p></div>`;
     h += pmaxCard(m);
-    h += `<div class="card"><h2>Journée type · moyenne du ${dmy(p.from)} au ${dmy(p.to)}</h2>${powerBars(profile(m.by, p), p.to, -1, 'Puissance moyenne par demi-heure sur la période sélectionnée')}<div class="legend">${LEG_HPHC}</div><p class="note">Chaque barre est la moyenne de cette demi-heure sur la période choisie en haut de page. Les blocs réguliers montrent les gros appareils programmés.</p></div>`;
+    h += `<div class="card"><h2>Journée type · moyenne du ${dmy(p.from)} au ${dmy(p.to)}</h2>${powerBars(profile(m.by, p), p.to, -1, 'Puissance moyenne par demi-heure sur la période sélectionnée', false, gmax && gmax.prof)}<div class="legend">${LEG_HPHC}</div><p class="note">Chaque barre est la moyenne de cette demi-heure sur la période choisie en haut de page. Les blocs réguliers montrent les gros appareils programmés.</p></div>`;
     return h;
   }
 
@@ -1336,7 +1344,7 @@ nav.tabs button{position:relative}
       <p class="note">${eur(cr.total)} avec ${esc(m.ref.name)}, abonnement inclus.${st.forced ? ` ${st.forced} créneau${st.forced > 1 ? 'x' : ''} corrigé${st.forced > 1 ? 's' : ''} à la main.` : ''}</p></div>`;
     if (st.src === '30min') {
       const sel = ui.sel != null && sl[ui.sel] ? ui.sel : null;
-      h += `<div class="card"><h2>Consommation par demi-heure (kWh)</h2>${powerBars(sl, d, sel, 'Puissance moyenne par demi-heure ce jour')}
+      h += `<div class="card"><h2>Consommation par demi-heure (kWh)</h2>${powerBars(sl, d, sel, 'Puissance moyenne par demi-heure ce jour', false, gmax && gmax.slot)}
         <div class="legend">${LEG_HPHC}<span>Contour pointillé : valeur corrigée</span></div>`;
       if (sel != null) {
         const s = sl[sel], k = (s.w * 0.5) / 1000, f = s.hs !== undefined ? s.hs : C.hcShare(d, s.min, S.schedules, S.shift);
@@ -1472,7 +1480,9 @@ nav.tabs button{position:relative}
     h += `<p class="small muted" style="margin:0 0 10px">Version de l'appli : <b>${APP_VERSION}</b> · ${APP_DATE}</p>`;
     h += syncCard();
     h += siteCard();
-    h += `<div class="card"><h2>Affichage</h2><label class="f">Choix des heures<select id="timemode" data-ch="timemode"><option value="native"${prefs().timeList ? '' : ' selected'}>Sélecteur d'heure du téléphone</option><option value="list"${prefs().timeList ? ' selected' : ''}>Liste d'heures (si les boutons du sélecteur sont coupés)</option></select></label></div>`;
+    h += `<div class="card"><h2>Affichage</h2><label class="f">Choix des heures<select id="timemode" data-ch="timemode"><option value="native"${prefs().timeList ? '' : ' selected'}>Sélecteur d'heure du téléphone</option><option value="list"${prefs().timeList ? ' selected' : ''}>Liste d'heures (si les boutons du sélecteur sont coupés)</option></select></label>
+      <label class="f" style="margin-top:10px">Échelle verticale des graphes de consommation<select id="scalemode" data-ch="scalemode"><option value="sel"${prefs().fixedScale ? '' : ' selected'}>Adaptée à ce qui est affiché (jour, période)</option><option value="all"${prefs().fixedScale ? ' selected' : ''}>Fixe : maximum de toutes les données</option></select></label>
+      <p class="note">Avec l'échelle fixe, toutes les barres des graphes Jour, Consommation et Journée type se comparent à la même hauteur d'un jour ou d'une période à l'autre.</p></div>`;
     const eqOpts = S.equip.length > 1 && ui.cat !== 'edf' ? `<label class="f" style="margin-top:10px">Équipement concerné par une recharge VE<select id="veeq" data-ch="veeq"><option value="">Choisi automatiquement</option>${S.equip.map((e) => `<option value="${e.id}"${ui.veEq === e.id ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>` : '';
     h += `<div class="card"><h2>Importer</h2><div class="row" style="margin-bottom:6px"><button class="btn" data-act="drvenedis"${sync.rbusy ? ' disabled' : ''}>Récupérer le dernier fichier Enedis (Drive)</button></div><p class="note" style="margin-top:0;margin-bottom:12px">Cherche conso-enedis.json sur ton Drive (déposé par le script du PC) et l'importe. Google te demande l'autorisation de lire ton Drive la première fois.</p><label class="f" style="margin-bottom:10px">Catégorie du fichier<select id="cat" data-ch="cat"><option value="auto"${ui.cat === 'auto' ? ' selected' : ''}>Détection automatique</option><option value="edf"${ui.cat === 'edf' ? ' selected' : ''}>EDF / distributeur (zip ou CSV)</option><option value="ve"${ui.cat === 've' ? ' selected' : ''}>Recharge VE (export du chargeur)</option></select></label>${eqOpts}<label class="row" style="gap:8px;margin-top:10px"><input type="checkbox" id="force" ${ui.force ? 'checked' : ''} data-ch="force"><span class="small">Écraser aussi mes croix forcées à la main (recharge VE)</span></label><label class="f" style="margin-top:10px">Un zip d'export, ou des fichiers CSV<input type="file" id="files" multiple data-ch="files"></label>
       <details open style="margin-top:10px"><summary class="small">Si « Choisir un fichier » ne réagit pas : coller le texte d'un CSV</summary><label class="f" style="margin-top:8px">Contenu du CSV (ouvre-le dans une appli de fichiers, copie tout, colle ici)<textarea id="pastecsv" placeholder="Nom,Heure,Début :,Fin :…"></textarea></label><div class="row" style="margin-top:8px"><button class="btn" data-act="pastecsv">Importer ce texte</button></div></details><p class="note">Chaque fichier est reconnu tout seul, zip compris. Choisir la catégorie évite qu'un fichier soit rangé au mauvais endroit. Réimporter met à jour les valeurs sans créer de doublons, et tes corrections manuelles sont conservées. Pour la recharge VE : une recharge courte coche seulement ses créneaux ; une recharge longue (prise restée branchée) coche les créneaux de la règle de l'équipement dans sa fenêtre, avec un avis « cohérent » ou « peu probable » ; un jour sans recharge n'a pas de croix. Tes croix forcées à la main (cadenas) sont protégées ; coche « Écraser » pour les remplacer.</p>${ui.msg ? `<div class="msg">${esc(ui.msg)}</div>` : ''}</div>`;
@@ -2231,6 +2241,7 @@ nav.tabs button{position:relative}
     else if (k === 'cat') { ui.cat = el.value; render(); }
     else if (k === 'relayfix') { S.relayFix = el.checked; save(); render(); }
     else if (k === 'autosync') { setPref('autoSync', el.checked); }
+    else if (k === 'scalemode') { setPref('fixedScale', el.value === 'all'); render(); }
     else if (k === 'timemode') { setPref('timeList', el.value === 'list'); render(); }
     else if (k === 'force') { ui.force = el.checked; }
     else if (k === 'veeq') { ui.veEq = el.value; render(); }
